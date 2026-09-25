@@ -5,77 +5,114 @@ from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-# فحص مجلد المستندات وقاعدة البيانات
 DOCS_DIR = "company_docs" if os.path.exists("company_docs") else "documents"
 CHROMA_DIR = "chroma_db"
 
 vector_db = None
-llm = None
 
 
-def get_rag():
-  """تحميل المحرك بنظام FastEmbed الخفيف جداً لاستهلاك أقل من 50MB رام فقط"""
-  global vector_db, llm
+def get_vector_db():
+  global vector_db
   if vector_db is None:
-    print(
-        "🔄 جاري تحميل محرك البحث الخفيف FastEmbed (استهلاك رام قليل جداً)..."
-    )
-    from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-    from langchain_community.vectorstores import Chroma
-    from langchain_groq import ChatGroq
+    try:
+      from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+      from langchain_community.vectorstores import Chroma
 
-    # استخدام FastEmbed بدلاً من PyTorch الثقيل
-    embeddings = FastEmbedEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-    vector_db = Chroma(
-        persist_directory=CHROMA_DIR, embedding_function=embeddings
-    )
-
-    groq_key = os.getenv("GROQ_API_KEY")
-    llm = ChatGroq(
-        model="llama-3.1-8b-instant", temperature=0.2, api_key=groq_key
-    )
-    print("✅ تم تجهيز الـ RAG بنجاح وبسرعة فائقة!")
-  return vector_db, llm
+      embeddings = FastEmbedEmbeddings(
+          model_name="sentence-transformers/all-MiniLM-L6-v2"
+      )
+      vector_db = Chroma(
+          persist_directory=CHROMA_DIR, embedding_function=embeddings
+      )
+    except Exception as e:
+      print(f"⚠️ ملاحظة في قاعدة المتجهات: {e}")
+      vector_db = False
+  return vector_db
 
 
 def query_rag(question):
-  try:
-    v_db, model = get_rag()
-    docs = v_db.similarity_search(question, k=4)
-    context = (
-        "\n\n".join([d.page_content for d in docs])
-        if docs
-        else "معلومات المقررات والوثائق المعتمدة."
+  # 1. التحقق من مفتاح Groq
+  groq_key = os.getenv("GROQ_API_KEY")
+  if not groq_key:
+    return (
+        "تنبيه: مفتاح GROQ_API_KEY غير موجود في إعدادات السيرفر. يرجى إضافته في"
+        " Environment Variables."
     )
 
-    prompt = f"""أنت موظف خدمة عملاء ودعم فني ذكي ولبق. تتحدث باللغة العربية بأسلوب بشري مهذب.
-أجب عن استفسار المتصل باختصار وبشكل مباشر من واقع نصوص وسياق الملفات لتناسب المكالمة الصوتية:
-- لا تكرر السؤال في بداية الإجابة، وابدأ بالشرح والجواب فوراً.
-- لا تعتذر ولا تقل لا أعلم.
+  # 2. استخراج السياق من الملفات بحماية تامة
+  context = ""
+  try:
+    v_db = get_vector_db()
+    if v_db:
+      docs = v_db.similarity_search(question, k=4)
+      if docs:
+        context = "\n\n".join([d.page_content for d in docs])
+  except Exception as e:
+    print(f"تنبيه أثناء البحث: {e}")
 
-سياق الملفات:
+  if not context:
+    context = (
+        "محتوى مقررات ووثائق النظام المعتمدة (تنظيم وتصميم الحاسوب، سجلات CAR"
+        " و AC، الذاكرة، والأمن السيبراني)."
+    )
+
+  # 3. صياغة الإجابة المباشرة بدون أي تكرار للسؤال وبدون اعتذار
+  try:
+    from langchain_groq import ChatGroq
+
+    llm = ChatGroq(
+        model="llama-3.1-8b-instant", temperature=0.2, api_key=groq_key
+    )
+
+    prompt = f"""أنت مساعد علمي وصوتي ذكي ولبق. تجيب باللغة العربية الفصحى المبسطة بأسلوب بشري واضح ومباشر:
+قواعد صارمة:
+- ممنوع منعاً باتاً تكرار أو إعادة كتابة السؤال في بداية الإجابة، وادخل في الشرح والحل فوراً.
+- ممنوع قول "بخصوص استفسارك" أو الاعتذار. اشرح المفهوم العلمي بدقة ومباشرة.
+- اجعل الإجابة مختصرة وواضحة لتناسب المحادثة الصوتية.
+
+سياق نصوص الملفات:
 {context}
 
-السؤال: {question}
-الإجابة الصوتية المباشرة:"""
+سؤال المتصل: {question}
+الإجابة الصوتية المباشرة (ابدأ بالحل فوراً):"""
 
-    res = model.invoke(prompt)
-    return res.content.strip()
+    res = llm.invoke(prompt)
+    answer = res.content.strip()
+
+    # تنظيف أي تكرار للسؤال إن وجد
+    lines = answer.split("\n")
+    if (
+        lines
+        and question.strip().rstrip("؟?.: ").lower()
+        in lines[0].strip().rstrip("؟?.: ").lower()
+    ):
+      answer = "\n".join(lines[1:]).strip()
+
+    prefixes = [
+        "سؤالك هو:",
+        "السؤال:",
+        "الإجابة المباشرة:",
+        "الجواب:",
+        "بخصوص استفسارك:",
+    ]
+    for p in prefixes:
+      if answer.startswith(p):
+        answer = answer[len(p) :].strip()
+
+    return answer
   except Exception as e:
-    print(f"Error in RAG: {e}")
-    return f"بخصوص استفسارك عن {question}، التفاصيل متوفرة وسأوضحها لك."
+    import traceback
+
+    traceback.print_exc()
+    return f"حدث خطأ في نموذج الذكاء الاصطناعي: {str(e)}"
 
 
-# مسارات الفحص الصحي للسيرفر (Ping) ليعمل في أقل من ثانية على Render
 @app.route("/", methods=["GET"])
 @app.route("/ping", methods=["GET"])
 def health():
   return "Vapi RAG Service is Live and Ready!", 200
 
 
-# مسار استقبال مكالمات Vapi والرد الصوتي المباشر
 @app.route("/chat/completions", methods=["POST"])
 def vapi_endpoint():
   data = request.get_json() or {}
@@ -87,15 +124,13 @@ def vapi_endpoint():
       user_question = m.get("content", "")
       break
 
-  print(f"\n📞 استفسار المتصل من Vapi: {user_question}")
-
+  print(f"\n📞 استفسار المتصل: {user_question}")
   answer = (
       query_rag(user_question)
       if user_question
       else "أهلاً بك، تفضل بطرح استفسارك."
   )
-
-  print(f"💡 رد النظام الصوتي: {answer}\n")
+  print(f"💡 رد النظام المباشر: {answer}\n")
 
   return jsonify({
       "id": f"chatcmpl-{int(time.time())}",
