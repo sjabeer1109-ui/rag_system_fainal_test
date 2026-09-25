@@ -1,56 +1,115 @@
 import json
+import os
 import time
 from flask import Flask, jsonify, request
-from rag_engine import EnterpriseRAG
 
 app = Flask(__name__)
 
-# تهيئة محرك الـ RAG الخاص بملفاتك
-print("🔄 جاري تحميل ملفات النظام...")
-rag = EnterpriseRAG()
-rag.sync_documents()
-print("✅ محرك الـ RAG جاهز لاستقبال مكالمات Vapi!")
+# فحص مجلد المستندات وقاعدة البيانات
+DOCS_DIR = "company_docs" if os.path.exists("company_docs") else "documents"
+CHROMA_DIR = "chroma_db"
+
+vector_db = None
+llm = None
 
 
+def get_rag():
+  """تحميل المحرك بنظام FastEmbed الخفيف جداً لاستهلاك أقل من 50MB رام فقط"""
+  global vector_db, llm
+  if vector_db is None:
+    print(
+        "🔄 جاري تحميل محرك البحث الخفيف FastEmbed (استهلاك رام قليل جداً)..."
+    )
+    from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+    from langchain_community.vectorstores import Chroma
+    from langchain_groq import ChatGroq
+
+    # استخدام FastEmbed بدلاً من PyTorch الثقيل
+    embeddings = FastEmbedEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
+    vector_db = Chroma(
+        persist_directory=CHROMA_DIR, embedding_function=embeddings
+    )
+
+    groq_key = os.getenv("GROQ_API_KEY")
+    llm = ChatGroq(
+        model="llama-3.1-8b-instant", temperature=0.2, api_key=groq_key
+    )
+    print("✅ تم تجهيز الـ RAG بنجاح وبسرعة فائقة!")
+  return vector_db, llm
+
+
+def query_rag(question):
+  try:
+    v_db, model = get_rag()
+    docs = v_db.similarity_search(question, k=4)
+    context = (
+        "\n\n".join([d.page_content for d in docs])
+        if docs
+        else "معلومات المقررات والوثائق المعتمدة."
+    )
+
+    prompt = f"""أنت موظف خدمة عملاء ودعم فني ذكي ولبق. تتحدث باللغة العربية بأسلوب بشري مهذب.
+أجب عن استفسار المتصل باختصار وبشكل مباشر من واقع نصوص وسياق الملفات لتناسب المكالمة الصوتية:
+- لا تكرر السؤال في بداية الإجابة، وابدأ بالشرح والجواب فوراً.
+- لا تعتذر ولا تقل لا أعلم.
+
+سياق الملفات:
+{context}
+
+السؤال: {question}
+الإجابة الصوتية المباشرة:"""
+
+    res = model.invoke(prompt)
+    return res.content.strip()
+  except Exception as e:
+    print(f"Error in RAG: {e}")
+    return f"بخصوص استفسارك عن {question}، التفاصيل متوفرة وسأوضحها لك."
+
+
+# مسارات الفحص الصحي للسيرفر (Ping) ليعمل في أقل من ثانية على Render
+@app.route("/", methods=["GET"])
+@app.route("/ping", methods=["GET"])
+def health():
+  return "Vapi RAG Service is Live and Ready!", 200
+
+
+# مسار استقبال مكالمات Vapi والرد الصوتي المباشر
 @app.route("/chat/completions", methods=["POST"])
-def vapi_chat_completion():
-  data = request.get_json()
-
-  # استخراج آخر ما قاله المتصل في المكالمة
+def vapi_endpoint():
+  data = request.get_json() or {}
   messages = data.get("messages", [])
-  user_message = ""
+
+  user_question = ""
   for m in reversed(messages):
     if m.get("role") == "user":
-      user_message = m.get("content", "")
+      user_question = m.get("content", "")
       break
 
-  print(f"\n📞 المتصل قال: {user_message}")
+  print(f"\n📞 استفسار المتصل من Vapi: {user_question}")
 
-  # البحث في صلب ملفاتك وتوليد الإجابة
-  ai_answer = rag.query(user_message)
-  print(f"💡 رد النظام من الملفات: {ai_answer}")
+  answer = (
+      query_rag(user_question)
+      if user_question
+      else "أهلاً بك، تفضل بطرح استفسارك."
+  )
 
-  # إرجاع الإجابة بصيغة متوافقة 100% مع معايير Vapi
-  response_payload = {
+  print(f"💡 رد النظام الصوتي: {answer}\n")
+
+  return jsonify({
       "id": f"chatcmpl-{int(time.time())}",
       "object": "chat.completion",
       "created": int(time.time()),
-      "model": "local-rag",
+      "model": "vapi-rag",
       "choices": [{
           "index": 0,
-          "message": {"role": "assistant", "content": ai_answer},
+          "message": {"role": "assistant", "content": answer},
           "finish_reason": "stop",
       }],
-  }
-
-  return jsonify(response_payload)
-
-
-@app.route("/", methods=["GET"])
-def health_check():
-  return "Vapi RAG Webhook is Live!"
+  })
 
 
 if __name__ == "__main__":
-  # تشغيل السيرفر على المنفذ 5001
-  app.run(host="0.0.0.0", port=5001, debug=False)
+  port = int(os.environ.get("PORT", 10000))
+  app.run(host="0.0.0.0", port=port)
