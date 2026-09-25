@@ -1,4 +1,3 @@
-streamlit
 flask
 gunicorn
 langchain
@@ -7,5 +6,4 @@ langchain-core
 langchain-groq
 chromadb
 pypdf
-sentence-transformers
-gTTS
+fastembed
