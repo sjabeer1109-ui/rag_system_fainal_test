@@ -8,7 +8,7 @@ import smtplib
 import time
 from call_center import CallCenterEngine
 import pandas as pd
-from rag_core import EnterpriseRAG
+from rag_engine import EnterpriseRAG
 import streamlit as st
 
 st.set_page_config(
