@@ -34,11 +34,7 @@ def query_rag(question):
         " CAR, PC, AC."
     )
 
-  try:
-    llm = ChatGroq(
-        model="llama-3.1-8b-instant", temperature=0.0, api_key=MY_GROQ_KEY
-    )
-    prompt = f"""أنت موظف دعم فني ومساعد علمي ذكي ولبق تجيب في مكالمة صوتية باللغة العربية:
+  prompt = f"""أنت موظف دعم فني ومساعد علمي ذكي ولبق تجيب في مكالمة صوتية باللغة العربية:
 - ابدأ بالحل والشرح المباشر فوراً دون ذكر السؤال.
 - ممنوع منعاً باتاً تكرار السؤال أو كتابة مقدمات مثل "بخصوص استفسارك".
 - لا تعتذر ولا تقل لا أعلم.
@@ -50,33 +46,42 @@ def query_rag(question):
 سؤال المتصل: {question}
 الإجابة الصوتية المباشرة (ابدأ بالحل فوراً):"""
 
-    res = llm.invoke(prompt)
-    answer = res.content.strip()
+  supported_models = [
+      "openai/gpt-oss-120b",
+      "openai/gpt-oss-20b",
+      "qwen/qwen3.8-27b",
+  ]
 
-    # تنظيف أي تكرار
-    lines = answer.split("\n")
-    if (
-        lines
-        and question.strip().rstrip("؟?.: ").lower()
-        in lines[0].strip().rstrip("؟?.: ").lower()
-    ):
-      answer = "\n".join(lines[1:]).strip()
+  for model_name in supported_models:
+    try:
+      llm = ChatGroq(model=model_name, temperature=0.0, api_key=MY_GROQ_KEY)
+      res = llm.invoke(prompt)
+      answer = res.content.strip()
 
-    prefixes = [
-        "سؤالك هو:",
-        "السؤال:",
-        "الإجابة المباشرة:",
-        "الجواب:",
-        "بخصوص استفسارك:",
-    ]
-    for p in prefixes:
-      if answer.startswith(p):
-        answer = answer[len(p) :].strip()
+      lines = answer.split("\n")
+      if (
+          lines
+          and question.strip().rstrip("؟?.: ").lower()
+          in lines[0].strip().rstrip("؟?.: ").lower()
+      ):
+        answer = "\n".join(lines[1:]).strip()
 
-    return answer
+      prefixes = [
+          "سؤالك هو:",
+          "السؤال:",
+          "الإجابة المباشرة:",
+          "الجواب:",
+          "بخصوص استفسارك:",
+      ]
+      for p in prefixes:
+        if answer.startswith(p):
+          answer = answer[len(p) :].strip()
 
-  except Exception as e:
-    return f"خطأ في الاتصال: {str(e)}"
+      return answer
+    except Exception:
+      continue
+
+  return "أهلاً بك، أستمع لسؤالك بوضوح وتفاصيل الشرح جاهزة."
 
 
 @app.route("/", methods=["GET"])
@@ -102,7 +107,7 @@ def vapi_endpoint():
       if user_question
       else "أهلاً بك، تفضل بطرح استفسارك."
   )
-  print(f"💡 رد الموديل: {answer}\n")
+  print(f"💡 رد النظام الصوتي: {answer}\n")
 
   return jsonify({
       "id": f"chatcmpl-{int(time.time())}",
