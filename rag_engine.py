@@ -39,14 +39,9 @@ class EnterpriseRAG:
     if not context:
       context = "محتوى مقررات ووثائق النظام: تنظيم وتصميم الحاسوب (Decoders, Memory, CS1, CS2, CAR, PC, AC)، المعمارية، والذاكرة، والأمن السيبراني."
 
-    # استخدام النموذج المعتمد والمتاح 100% في Groq
-    try:
-      llm = ChatGroq(
-          model="llama-3.1-8b-instant", temperature=0.0, api_key=self.api_key
-      )
-      prompt = f"""أنت أستاذ ومساعد علمي متخصص في شرح مقررات تنظيم وتصميم الحاسوب.
-أجب عن السؤال التالي بشكل علمي دقيق ومفصل ومباشر:
-- ابدأ بالحل والشرح المباشر فوراً دون تكرار السؤال.
+    prompt = f"""أنت أستاذ ومساعد علمي متخصص في شرح مقررات تنظيم وتصميم الحاسوب.
+أجب عن السؤال التالي بشكل علمي دقيق، مفصل، ومباشر:
+- ابدأ بالحل والشرح المباشر فوراً دون ذكر السؤال.
 - لا تعتذر ولا تقل لا أعلم.
 
 سياق الملفات:
@@ -55,8 +50,23 @@ class EnterpriseRAG:
 السؤال المطلوب حله: {question}
 الشرح العلمي المباشر:"""
 
-      res = llm.invoke(prompt)
-      return res.content.strip()
+    # قائمة النماذج النشطة في الخطة المجانية بالترتيب
+    supported_models = [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b",
+    ]
 
-    except Exception as e:
-      return f"❌ خطأ من سيرفر الذكاء الاصطناعي: {str(e)}"
+    last_error = ""
+    for model_name in supported_models:
+      try:
+        llm = ChatGroq(
+            model=model_name, temperature=0.0, api_key=self.api_key
+        )
+        res = llm.invoke(prompt)
+        return res.content.strip()
+      except Exception as err:
+        last_error = str(err)
+        continue
+
+    return f"❌ خطأ من سيرفر الذكاء الاصطناعي: {last_error}"
