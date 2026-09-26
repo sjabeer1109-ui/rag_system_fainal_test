@@ -45,8 +45,10 @@ def query_rag(question):
     from langchain_groq import ChatGroq
 
     llm = ChatGroq(
-        llm = ChatGroq(model="llama-3.1-8b-instant", temperature=0.2, api_key="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")
-    )
+    model="llama-3.3-70b-versatile",
+    temperature=0.0,
+    api_key="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",
+)
 
     prompt = f"""أنت موظف خدمة عملاء ودعم فني ذكي ولبق. تتحدث باللغة العربية بأسلوب بشري واضح ومباشر:
 قواعد صارمة:
