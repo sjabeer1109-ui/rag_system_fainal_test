@@ -4,7 +4,6 @@ import os
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_groq import ChatGroq
 
-# مفتاحك الحقيقي مدمج مباشرة
 MY_GROQ_KEY = "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"
 
 
@@ -20,7 +19,6 @@ class EnterpriseRAG:
     return True, "النظام جاهز ومفهرس."
 
   def query(self, question: str) -> str:
-    # محاولة جلب السياق من ملفات المتجهات إن وجدت
     context = ""
     try:
       from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
@@ -41,13 +39,13 @@ class EnterpriseRAG:
     if not context:
       context = "محتوى مقررات ووثائق النظام: تنظيم وتصميم الحاسوب (Decoders, Memory, CS1, CS2, CAR, PC, AC)، المعمارية، والذاكرة، والأمن السيبراني."
 
-    # استدعاء الموديل العملاق والأذكى عالمياً 70B
+    # استخدام النموذج المعتمد والمتاح 100% في Groq
     try:
       llm = ChatGroq(
-          model="llama-3.3-70b-versatile", temperature=0.0, api_key=self.api_key
+          model="llama-3.1-8b-instant", temperature=0.0, api_key=self.api_key
       )
       prompt = f"""أنت أستاذ ومساعد علمي متخصص في شرح مقررات تنظيم وتصميم الحاسوب.
-أجب عن السؤال التالي بشكل علمي دقيق، مفصل، واشرح وظيفة كل جزء بوضوح تام:
+أجب عن السؤال التالي بشكل علمي دقيق ومفصل ومباشر:
 - ابدأ بالحل والشرح المباشر فوراً دون تكرار السؤال.
 - لا تعتذر ولا تقل لا أعلم.
 
