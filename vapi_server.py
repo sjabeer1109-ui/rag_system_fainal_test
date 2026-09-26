@@ -2,20 +2,16 @@ import json
 import os
 import time
 from flask import Flask, jsonify, request
+from langchain_groq import ChatGroq
 
 app = Flask(__name__)
 
-DOCS_DIR = "company_docs" if os.path.exists("company_docs") else "documents"
+# مفتاحك الحقيقي مدمج مباشرة
+MY_GROQ_KEY = "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"
 CHROMA_DIR = "chroma_db"
 
 
 def query_rag(question):
-  # 1. التحقق من وجود مفتاح Groq في السيرفر
-  groq_key = os.getenv("GROQ_API_KEY")
-  if not groq_key:
-    return "خطأ: مفتاح GROQ_API_KEY غير موجود في إعدادات Render!"
-
-  # 2. محاولة البحث في المستندات بحماية تامة
   context = ""
   try:
     from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
@@ -31,31 +27,23 @@ def query_rag(question):
     if docs:
       context = "\n\n".join([d.page_content for d in docs])
   except Exception as e:
-    print(f"Chroma Search Bypassed: {e}")
+    print(f"Chroma Bypassed: {e}")
 
-  # سياق احتياطي في حال كانت قاعدة البيانات فارغة لضمان عدم توقف الذكاء
   if not context:
     context = (
-        "محتوى مقررات ووثائق النظام: تنظيم وتصميم الحاسوب (Ch5, Ch7, Ch12)،"
-        " المعمارية، الذاكرة، والأمن السيبراني."
+        "محتوى مقررات تنظيم وتصميم الحاسوب: Decoders, Memory Chips, CS1, CS2,"
+        " CAR, PC, AC."
     )
 
-  # 3. استدعاء Groq لتوليد الرد الصوتي المباشر
   try:
-    from langchain_groq import ChatGroq
-
     llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    temperature=0.0,
-    api_key="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",
-)
-
-    prompt = f"""أنت موظف خدمة عملاء ودعم فني ذكي ولبق. تتحدث باللغة العربية بأسلوب بشري واضح ومباشر:
-قواعد صارمة:
+        model="llama-3.3-70b-versatile", temperature=0.0, api_key=MY_GROQ_KEY
+    )
+    prompt = f"""أنت موظف دعم فني ومساعد علمي ذكي ولبق تجيب في مكالمة صوتية باللغة العربية الفصحى:
 - ابدأ بالحل والشرح المباشر فوراً دون ذكر السؤال.
 - ممنوع منعاً باتاً تكرار السؤال أو كتابة مقدمات مثل "بخصوص استفسارك".
 - لا تعتذر ولا تقل لا أعلم.
-- اجعل الإجابة مختصرة وواضحة لتناسب المكالمة الصوتية.
+- اجعل الإجابة مركزة وواضحة لتناسب المكالمة الصوتية.
 
 سياق الملفات:
 {context}
@@ -66,7 +54,7 @@ def query_rag(question):
     res = llm.invoke(prompt)
     answer = res.content.strip()
 
-    # تنظيف أي تكرار محتمل للسؤال
+    # تنظيف أي تكرار
     lines = answer.split("\n")
     if (
         lines
@@ -89,17 +77,15 @@ def query_rag(question):
     return answer
 
   except Exception as e:
-    return f"خطأ في الاتصال بـ Groq: {str(e)}"
+    return f"خطأ في الاتصال: {str(e)}"
 
 
-# مسار الفحص الصحي ليعمل السيرفر في ثانية واحدة على Render
 @app.route("/", methods=["GET"])
 @app.route("/ping", methods=["GET"])
 def health():
   return "Vapi RAG Service is Live and Ready!", 200
 
 
-# مسار استقبال وتوجيه مكالمات Vapi
 @app.route("/chat/completions", methods=["POST"])
 def vapi_endpoint():
   data = request.get_json() or {}
@@ -111,13 +97,13 @@ def vapi_endpoint():
       user_question = m.get("content", "")
       break
 
-  print(f"\n📞 استفسار المتصل عبر Vapi: {user_question}")
+  print(f"\n📞 مكالمة Vapi: {user_question}")
   answer = (
       query_rag(user_question)
       if user_question
       else "أهلاً بك، تفضل بطرح استفسارك."
   )
-  print(f"💡 رد النظام المباشر: {answer}\n")
+  print(f"💡 رد الموديل 70B: {answer}\n")
 
   return jsonify({
       "id": f"chatcmpl-{int(time.time())}",
