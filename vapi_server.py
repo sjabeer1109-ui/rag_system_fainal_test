@@ -1,8 +1,7 @@
 import json
 import os
 import time
-from flask import Flask, jsonify, request
-from langchain_groq import ChatGroq
+from flask import Flask, Response, jsonify, request
 
 app = Flask(__name__)
 
@@ -10,7 +9,8 @@ MY_GROQ_KEY = "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"
 CHROMA_DIR = "chroma_db"
 
 
-def query_rag(question):
+def get_context(question):
+  """جلب السياق من ملفات النظام"""
   context = ""
   try:
     from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
@@ -29,59 +29,8 @@ def query_rag(question):
     print(f"Chroma Bypassed: {e}")
 
   if not context:
-    context = (
-        "محتوى مقررات تنظيم وتصميم الحاسوب: Decoders, Memory Chips, CS1, CS2,"
-        " CAR, PC, AC."
-    )
-
-  prompt = f"""أنت موظف دعم فني ومساعد علمي ذكي ولبق تجيب في مكالمة صوتية باللغة العربية:
-- ابدأ بالحل والشرح المباشر فوراً دون ذكر السؤال.
-- ممنوع منعاً باتاً تكرار السؤال أو كتابة مقدمات مثل "بخصوص استفسارك".
-- لا تعتذر ولا تقل لا أعلم.
-- اجعل الإجابة مركزة وواضحة لتناسب المكالمة الصوتية.
-
-سياق الملفات:
-{context}
-
-سؤال المتصل: {question}
-الإجابة الصوتية المباشرة (ابدأ بالحل فوراً):"""
-
-  supported_models = [
-      "openai/gpt-oss-120b",
-      "openai/gpt-oss-20b",
-      "qwen/qwen3.8-27b",
-  ]
-
-  for model_name in supported_models:
-    try:
-      llm = ChatGroq(model=model_name, temperature=0.0, api_key=MY_GROQ_KEY)
-      res = llm.invoke(prompt)
-      answer = res.content.strip()
-
-      lines = answer.split("\n")
-      if (
-          lines
-          and question.strip().rstrip("؟?.: ").lower()
-          in lines[0].strip().rstrip("؟?.: ").lower()
-      ):
-        answer = "\n".join(lines[1:]).strip()
-
-      prefixes = [
-          "سؤالك هو:",
-          "السؤال:",
-          "الإجابة المباشرة:",
-          "الجواب:",
-          "بخصوص استفسارك:",
-      ]
-      for p in prefixes:
-        if answer.startswith(p):
-          answer = answer[len(p) :].strip()
-
-      return answer
-    except Exception:
-      continue
-
-  return "أهلاً بك، أستمع لسؤالك بوضوح وتفاصيل الشرح جاهزة."
+    context = "محتوى مقررات ووثائق تنظيم وتصميم الحاسوب: Direct vs Indirect Addressing, Memory, CAR, PC, Decoders, والأمن السيبراني."
+  return context
 
 
 @app.route("/", methods=["GET"])
@@ -94,6 +43,7 @@ def health():
 def vapi_endpoint():
   data = request.get_json() or {}
   messages = data.get("messages", [])
+  is_streaming = data.get("stream", True)  # Vapi يطلب stream افتراضياً
 
   user_question = ""
   for m in reversed(messages):
@@ -101,25 +51,78 @@ def vapi_endpoint():
       user_question = m.get("content", "")
       break
 
-  print(f"\n📞 مكالمة Vapi: {user_question}")
-  answer = (
-      query_rag(user_question)
-      if user_question
-      else "أهلاً بك، تفضل بطرح استفسارك."
-  )
-  print(f"💡 رد النظام الصوتي: {answer}\n")
+  print(f"\n📞 استفسار المتصل عبر Vapi: {user_question}")
+  if not user_question:
+    user_question = "أهلاً بك"
 
-  return jsonify({
-      "id": f"chatcmpl-{int(time.time())}",
-      "object": "chat.completion",
-      "created": int(time.time()),
-      "model": "vapi-rag",
-      "choices": [{
-          "index": 0,
-          "message": {"role": "assistant", "content": answer},
-          "finish_reason": "stop",
-      }],
-  })
+  context = get_context(user_question)
+
+  prompt = f"""أنت موظفة خدمة عملاء ودعم فني ذكية ولبقة تجيبين في مكالمة صوتية باللغة العربية الفصحى المبسطة:
+قواعد صارمة:
+- ابدئي بالشرح المباشر فوراً دون ذكر السؤال ودون مقدمات مثل "بخصوص استفسارك".
+- لا تعتذري واشرحي المفهوم العلمي بدقة ومباشرة.
+- اجعلي الإجابة مركزة وسلسة لتناسب المحادثة الصوتية.
+
+سياق الملفات:
+{context}
+
+سؤال المتصل: {user_question}
+الإجابة الصوتية المباشرة (ابدئي بالحل فوراً):"""
+
+  # مولد الـ Streaming المتوافق 100% مع Vapi
+  def generate_sse():
+    chunk_id = f"chatcmpl-{int(time.time())}"
+    from langchain_groq import ChatGroq
+
+    supported_models = [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b",
+        "qwen/qwen3.8-27b",
+    ]
+
+    llm = None
+    for m_name in supported_models:
+      try:
+        llm = ChatGroq(model=m_name, temperature=0.0, api_key=MY_GROQ_KEY)
+        # تجربة الاتصال بالتدفق
+        stream_iter = llm.stream(prompt)
+        for chunk in stream_iter:
+          token = chunk.content
+          if token:
+            payload = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": m_name,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": token},
+                    "finish_reason": None,
+                }],
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+        break
+      except Exception as err:
+        print(f"Error with model {m_name}: {err}")
+        continue
+
+    # إرسال إشارة اكتمال الإجابة لـ Vapi
+    stop_payload = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": "vapi-rag",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    yield f"data: {json.dumps(stop_payload)}\n\n"
+    yield "data: [DONE]\n\n"
+
+  # إرجاع الرد كتدفق حقيقي (Event Stream) لـ Vapi
+  return Response(
+      generate_sse(),
+      mimetype="text/event-stream",
+      headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+  )
 
 
 if __name__ == "__main__":
