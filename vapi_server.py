@@ -8,55 +8,39 @@ app = Flask(__name__)
 DOCS_DIR = "company_docs" if os.path.exists("company_docs") else "documents"
 CHROMA_DIR = "chroma_db"
 
-vector_db = None
-
-
-def get_vector_db():
-  global vector_db
-  if vector_db is None:
-    try:
-      from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-      from langchain_community.vectorstores import Chroma
-
-      embeddings = FastEmbedEmbeddings(
-          model_name="sentence-transformers/all-MiniLM-L6-v2"
-      )
-      vector_db = Chroma(
-          persist_directory=CHROMA_DIR, embedding_function=embeddings
-      )
-    except Exception as e:
-      print(f"⚠️ ملاحظة في قاعدة المتجهات: {e}")
-      vector_db = False
-  return vector_db
-
 
 def query_rag(question):
-  # 1. التحقق من مفتاح Groq
+  # 1. التحقق من وجود مفتاح Groq في السيرفر
   groq_key = os.getenv("GROQ_API_KEY")
   if not groq_key:
-    return (
-        "تنبيه: مفتاح GROQ_API_KEY غير موجود في إعدادات السيرفر. يرجى إضافته في"
-        " Environment Variables."
-    )
+    return "خطأ: مفتاح GROQ_API_KEY غير موجود في إعدادات Render!"
 
-  # 2. استخراج السياق من الملفات بحماية تامة
+  # 2. محاولة البحث في المستندات بحماية تامة
   context = ""
   try:
-    v_db = get_vector_db()
-    if v_db:
-      docs = v_db.similarity_search(question, k=4)
-      if docs:
-        context = "\n\n".join([d.page_content for d in docs])
-  except Exception as e:
-    print(f"تنبيه أثناء البحث: {e}")
+    from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+    from langchain_community.vectorstores import Chroma
 
+    embeddings = FastEmbedEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
+    )
+    v_db = Chroma(
+        persist_directory=CHROMA_DIR, embedding_function=embeddings
+    )
+    docs = v_db.similarity_search(question, k=4)
+    if docs:
+      context = "\n\n".join([d.page_content for d in docs])
+  except Exception as e:
+    print(f"Chroma Search Bypassed: {e}")
+
+  # سياق احتياطي في حال كانت قاعدة البيانات فارغة لضمان عدم توقف الذكاء
   if not context:
     context = (
-        "محتوى مقررات ووثائق النظام المعتمدة (تنظيم وتصميم الحاسوب، سجلات CAR"
-        " و AC، الذاكرة، والأمن السيبراني)."
+        "محتوى مقررات ووثائق النظام: تنظيم وتصميم الحاسوب (Ch5, Ch7, Ch12)،"
+        " المعمارية، الذاكرة، والأمن السيبراني."
     )
 
-  # 3. صياغة الإجابة المباشرة بدون أي تكرار للسؤال وبدون اعتذار
+  # 3. استدعاء Groq لتوليد الرد الصوتي المباشر
   try:
     from langchain_groq import ChatGroq
 
@@ -64,13 +48,14 @@ def query_rag(question):
         model="llama-3.1-8b-instant", temperature=0.2, api_key=groq_key
     )
 
-    prompt = f"""أنت مساعد علمي وصوتي ذكي ولبق. تجيب باللغة العربية الفصحى المبسطة بأسلوب بشري واضح ومباشر:
+    prompt = f"""أنت موظف خدمة عملاء ودعم فني ذكي ولبق. تتحدث باللغة العربية بأسلوب بشري واضح ومباشر:
 قواعد صارمة:
-- ممنوع منعاً باتاً تكرار أو إعادة كتابة السؤال في بداية الإجابة، وادخل في الشرح والحل فوراً.
-- ممنوع قول "بخصوص استفسارك" أو الاعتذار. اشرح المفهوم العلمي بدقة ومباشرة.
-- اجعل الإجابة مختصرة وواضحة لتناسب المحادثة الصوتية.
+- ابدأ بالحل والشرح المباشر فوراً دون ذكر السؤال.
+- ممنوع منعاً باتاً تكرار السؤال أو كتابة مقدمات مثل "بخصوص استفسارك".
+- لا تعتذر ولا تقل لا أعلم.
+- اجعل الإجابة مختصرة وواضحة لتناسب المكالمة الصوتية.
 
-سياق نصوص الملفات:
+سياق الملفات:
 {context}
 
 سؤال المتصل: {question}
@@ -79,7 +64,7 @@ def query_rag(question):
     res = llm.invoke(prompt)
     answer = res.content.strip()
 
-    # تنظيف أي تكرار للسؤال إن وجد
+    # تنظيف أي تكرار محتمل للسؤال
     lines = answer.split("\n")
     if (
         lines
@@ -100,19 +85,19 @@ def query_rag(question):
         answer = answer[len(p) :].strip()
 
     return answer
+
   except Exception as e:
-    import traceback
-
-    traceback.print_exc()
-    return f"حدث خطأ في نموذج الذكاء الاصطناعي: {str(e)}"
+    return f"خطأ في الاتصال بـ Groq: {str(e)}"
 
 
+# مسار الفحص الصحي ليعمل السيرفر في ثانية واحدة على Render
 @app.route("/", methods=["GET"])
 @app.route("/ping", methods=["GET"])
 def health():
   return "Vapi RAG Service is Live and Ready!", 200
 
 
+# مسار استقبال وتوجيه مكالمات Vapi
 @app.route("/chat/completions", methods=["POST"])
 def vapi_endpoint():
   data = request.get_json() or {}
@@ -124,7 +109,7 @@ def vapi_endpoint():
       user_question = m.get("content", "")
       break
 
-  print(f"\n📞 استفسار المتصل: {user_question}")
+  print(f"\n📞 استفسار المتصل عبر Vapi: {user_question}")
   answer = (
       query_rag(user_question)
       if user_question
