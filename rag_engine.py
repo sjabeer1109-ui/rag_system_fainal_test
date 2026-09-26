@@ -53,8 +53,10 @@ class EnterpriseRAG:
     # الاتصال المباشر بـ Groq
     try:
       llm = ChatGroq(
-          model="llama-3.1-8b-instant", temperature=0.2, api_key=self.api_key
-      )
+    model="llama-3.3-70b-versatile",
+    temperature=0.0,
+    api_key="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",
+)
       prompt = f"""أنت مساعد علمي متخصص في شرح وثائق ومقررات المادة.
 قواعد صارمة:
 - ابدأ بالحل والشرح المباشر فوراً.
