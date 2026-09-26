@@ -8,15 +8,15 @@ from langchain_groq import ChatGroq
 class EnterpriseRAG:
 
   def __init__(
-      self, docs_dir="company_docs", persist_dir="chroma_db", groq_api_key=None
+      self, docs_dir="documents", persist_dir="chroma_db", groq_api_key=None
   ):
-    self.docs_dir = docs_dir if os.path.exists(docs_dir) else "documents"
+    self.docs_dir = docs_dir if os.path.exists(docs_dir) else "."
     self.persist_dir = persist_dir
 
     os.makedirs(self.docs_dir, exist_ok=True)
     os.makedirs(self.persist_dir, exist_ok=True)
 
-    # قراءة مفتاح Groq سواء من بيئة السيرفر أو من Streamlit Secrets
+    # قراءة مفتاح Groq من بيئة السيرفر أو من Streamlit Secrets
     self.api_key = groq_api_key or os.getenv("GROQ_API_KEY")
     if not self.api_key:
       try:
@@ -27,6 +27,7 @@ class EnterpriseRAG:
         pass
 
     self.vector_db = None
+    self.processed_hashes = {}
     self._init_db()
 
   def _init_db(self):
@@ -48,7 +49,7 @@ class EnterpriseRAG:
     if not self.vector_db:
       self._init_db()
     if not self.vector_db:
-      return False, "فشل الاتصال بقاعدة المتجهات."
+      return False, "قاعدة البيانات قيد التجهيز."
 
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -75,14 +76,15 @@ class EnterpriseRAG:
           if docs:
             chunks = splitter.split_documents(docs)
             self.vector_db.add_documents(chunks)
+            self.processed_hashes[filename] = "indexed"
             count += 1
         except Exception as e:
-          print(f"Error {filename}: {e}")
+          print(f"Error indexing {filename}: {e}")
     return True, f"تمت فهرسة {count} ملف بنجاح."
 
   def query(self, question: str) -> str:
     if not self.api_key:
-      return "يرجى إضافة مفتاح GROQ_API_KEY في إعدادات السيرفر أو في Streamlit Secrets."
+      return "⚠️ تنبيه: يرجى وضع مفتاح GROQ_API_KEY في Streamlit Secrets ليعمل الذكاء الاصطناعي."
 
     context = ""
     try:
@@ -100,17 +102,17 @@ class EnterpriseRAG:
       llm = ChatGroq(
           model="llama-3.1-8b-instant", temperature=0.2, api_key=self.api_key
       )
-      prompt = f"""أنت مساعد علمي متخصص في شرح وثائق ومقررات المادة.
-قواعد صارمة:
-- ممنوع تكرار السؤال أو كتابة مقدمات مثل "بخصوص استفسارك".
+      prompt = f"""أنت مساعد علمي متخصص في شرح وثائق ومقررات المادة بدقة ووضوح.
+قواعد صارمة للإجابة:
+- ممنوع منعاً باتاً تكرار السؤال أو كتابة مقدمات مثل "بخصوص استفسارك".
 - ابدأ بالحل والشرح المباشر فوراً.
 - لا تعتذر ولا تقل لا أعلم.
 
-سياق الملفات:
+سياق نصوص الملفات:
 {context}
 
 السؤال المطلوب حله: {question}
-الإجابة العلمية المباشرة:"""
+الإجابة العلمية المباشرة (ابدأ بالحل فوراً):"""
 
       res = llm.invoke(prompt)
       ans = res.content.strip()
@@ -126,4 +128,4 @@ class EnterpriseRAG:
 
       return ans
     except Exception as e:
-      return f"خطأ في توليد الإجابة: {str(e)}"
+      return f"حدث خطأ في توليد الإجابة: {str(e)}"
