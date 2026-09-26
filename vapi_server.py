@@ -6,7 +6,6 @@ from langchain_groq import ChatGroq
 
 app = Flask(__name__)
 
-# مفتاحك الحقيقي مدمج مباشرة
 MY_GROQ_KEY = "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"
 CHROMA_DIR = "chroma_db"
 
@@ -37,9 +36,9 @@ def query_rag(question):
 
   try:
     llm = ChatGroq(
-        model="llama-3.3-70b-versatile", temperature=0.0, api_key=MY_GROQ_KEY
+        model="llama-3.1-8b-instant", temperature=0.0, api_key=MY_GROQ_KEY
     )
-    prompt = f"""أنت موظف دعم فني ومساعد علمي ذكي ولبق تجيب في مكالمة صوتية باللغة العربية الفصحى:
+    prompt = f"""أنت موظف دعم فني ومساعد علمي ذكي ولبق تجيب في مكالمة صوتية باللغة العربية:
 - ابدأ بالحل والشرح المباشر فوراً دون ذكر السؤال.
 - ممنوع منعاً باتاً تكرار السؤال أو كتابة مقدمات مثل "بخصوص استفسارك".
 - لا تعتذر ولا تقل لا أعلم.
@@ -103,7 +102,7 @@ def vapi_endpoint():
       if user_question
       else "أهلاً بك، تفضل بطرح استفسارك."
   )
-  print(f"💡 رد الموديل 70B: {answer}\n")
+  print(f"💡 رد الموديل: {answer}\n")
 
   return jsonify({
       "id": f"chatcmpl-{int(time.time())}",
