@@ -1,13 +1,17 @@
+import asyncio
 import base64
+import concurrent.futures
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import io
 import json
 import os
 import re
 import smtplib
 import time
 from call_center import CallCenterEngine
+import edge_tts
 import pandas as pd
 from rag_engine import EnterpriseRAG
 import streamlit as st
@@ -124,7 +128,7 @@ def _extract_json_object(raw_text):
   start = cleaned.find("{")
   end = cleaned.rfind("}")
   if start != -1 and end != -1:
-    cleaned = cleaned[start:end + 1]
+    cleaned = cleaned[start : end + 1]
   return json.loads(cleaned)
 
 
@@ -187,7 +191,9 @@ def render_smart_faq(rag, allow_generate=False):
         st.info("لم يتم توليد أسئلة ذكية بعد من الملفات.")
     with col_g2:
       if st.button("🧠 توليد / تحديث الأسئلة من الملفات"):
-        with st.spinner("جاري تحليل الملفات وتوليد الأسئلة المتوقعة وإجاباتها..."):
+        with st.spinner(
+            "جاري تحليل الملفات وتوليد الأسئلة المتوقعة وإجاباتها..."
+        ):
           ok, msg, new_cache = generate_smart_faq(rag)
         if ok:
           st.success(msg)
@@ -336,13 +342,13 @@ def count_unread_private_thread(reader_username, thread_key):
   if not last:
     return len(msgs)
   return sum(
-      1 for m in msgs if m["timestamp"] > last and m["sender_username"] != reader_username
+      1
+      for m in msgs
+      if m["timestamp"] > last and m["sender_username"] != reader_username
   )
 
 
 def get_thread_key(username_a, username_b):
-  """مفتاح ثابت لمحادثة خاصة بين أي شخصين (موظف-موظف أو موظف-مدير)،
-  بغض النظر عن ترتيب إدخالهم."""
   return "__".join(sorted([username_a, username_b]))
 
 
@@ -383,7 +389,6 @@ def create_task_for_employee(target_user, task_text, source="عبر الشات")
 
 
 def try_create_task_from_message(text, sender_role):
-  """يفهم رسائل بصيغة: مهمة: الى (اسم الموظف): (نص المهمة)"""
   if sender_role != "admin":
     return None
   m = re.search(
@@ -415,7 +420,10 @@ def render_group_chat(current_user):
         save_group_state(state)
         st.rerun()
     if not state.get("open", True):
-      st.warning("المحادثة مغلقة حالياً من قبل الإدارة (الموظفون لا يقدروا يرسلوا رسائل).")
+      st.warning(
+          "المحادثة مغلقة حالياً من قبل الإدارة (الموظفون لا يقدروا يرسلوا"
+          " رسائل)."
+      )
   else:
     if not state.get("open", True):
       st.warning("🔒 المحادثة مغلقة حالياً من قبل الإدارة.")
@@ -464,7 +472,9 @@ def render_group_chat(current_user):
       }
       msgs.append(entry)
       save_group_chat(msgs)
-      assigned_name = try_create_task_from_message(new_msg, current_user["role"])
+      assigned_name = try_create_task_from_message(
+          new_msg, current_user["role"]
+      )
       if assigned_name:
         sys_id = max([m["id"] for m in msgs], default=0) + 1
         msgs.append({
@@ -472,7 +482,9 @@ def render_group_chat(current_user):
             "username": "system",
             "name": "🔔 النظام",
             "role": "system",
-            "content": f"✅ تم إسناد مهمة تلقائياً لـ {assigned_name} من رسالة الإدارة.",
+            "content": (
+                f"✅ تم إسناد مهمة تلقائياً لـ {assigned_name} من رسالة الإدارة."
+            ),
             "timestamp": now_ts(),
             "pinned": False,
         })
@@ -529,9 +541,9 @@ def render_company_chats_tab(current_user):
     render_group_chat(current_user)
 
   with sub_private:
-    # أي شخص بالنظام (مدير أو موظف) يقدر يحكي خاص مع أي شخص ثاني.
     others = [
-        u for u in st.session_state.users_db
+        u
+        for u in st.session_state.users_db
         if u["username"] != current_user["username"]
     ]
     if not others:
@@ -558,13 +570,40 @@ def render_company_chats_tab(current_user):
 
 
 # ==============================================================================
-# سيدرا — المساعد الصوتي الخاص بالمدير (زي شات صوتي يدير أمور الشركة)
+# دالة توليد صوت سيدرا الحقيقي (متوافقة مع Render & Streamlit Cloud)
 # ==============================================================================
+def generate_sedra_voice(text):
+  try:
+    clean_text = re.sub(r"[^\w\s\u0600-\u06FF،.؟]", "", text).strip()
+    if not clean_text:
+      return None
+
+    def _worker():
+      new_loop = asyncio.new_event_loop()
+      asyncio.set_event_loop(new_loop)
+
+      async def _tts_task():
+        # صوت أردني نسائي طبيعي ar-JO-SanaNeural (أو ar-SA-ZariyahNeural)
+        communicate = edge_tts.Communicate(clean_text, voice="ar-JO-SanaNeural")
+        audio_bytes = b""
+        async for chunk in communicate.stream():
+          if chunk["type"] == "audio":
+            audio_bytes += chunk["data"]
+        return audio_bytes
+
+      try:
+        return new_loop.run_until_complete(_tts_task())
+      finally:
+        new_loop.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+      return executor.submit(_worker).result()
+  except Exception:
+    return None
+
+
 # ==============================================================================
-# سيدرا — المساعد الصوتي الخاص بالمدير (سكرتير صوتي تنفيذي لإدارة الشركة)
-# ==============================================================================
-# ==============================================================================
-# سيدرا — المساعد الصوتي الخاص بالمدير (نسخة محسنة تعمل بدون حظر المتصفح)
+# سيدرا — المساعد الصوتي والوكيل التنفيذي للشركة (شات صوتي حقيقي)
 # ==============================================================================
 def load_sedra_sessions():
   return load_json(SEDRA_CHAT_FILE, {"sessions": []})
@@ -597,7 +636,7 @@ def sedra_handle_command(text, rag, admin_user):
           "pinned": False,
       })
       save_group_chat(msgs)
-      return f'📢 حاضر يا مديرنا، تم إرسال رسالتك لقروب الشركة فوراً: "{content}"'
+      return f'حاضر يا مديرنا، تم إرسال رسالتك لقروب الشركة: "{content}"'
 
   # 2. أمر إرسال رسالة خاصة لموظف محدد
   m = re.search(
@@ -621,9 +660,9 @@ def sedra_handle_command(text, rag, admin_user):
       })
       chats[thread_key] = thread
       save_private_chats(chats)
-      return f'✉️ تم إرسال الرسالة الخاصة للموظف {target["name"]}: "{content}"'
+      return f'تم إرسال الرسالة الخاصة للموظف {target["name"]}: "{content}"'
     elif not target:
-      return f'⚠️ لم أجد موظفاً باسم "{emp_name_query}" في النظام.'
+      return f'لم أجد موظفاً باسم "{emp_name_query}" في النظام.'
 
   # 3. أمر إسناد / تكليف موظف بمهمة
   m = re.search(
@@ -639,11 +678,11 @@ def sedra_handle_command(text, rag, admin_user):
     target = find_employee_by_name(emp_name_query)
     if target and task_text:
       create_task_for_employee(target, task_text, source="عبر أوامر سيدرا")
-      return f'📋 تم تسجيل المهمة وإسنادها للموظف {target["name"]}: "{task_text}"'
+      return f'تم تكليف الموظف {target["name"]} بالمهمة: "{task_text}"'
     elif not target:
-      return f'⚠️ لم يتم العثور على الموظف "{emp_name_query}" لإسناد المهمة.'
+      return f'لم يتم العثور على الموظف "{emp_name_query}".'
 
-  # 4. أسئلة إدارية سريعة وخاصة بالمدير
+  # 4. استفسارات إدارية سرية للمدير
   if "مين الموظفين" in t or "قائمة الموظفين" in t:
     emps = [
         f"• {u['name']} ({u['job_title']})"
@@ -651,21 +690,21 @@ def sedra_handle_command(text, rag, admin_user):
         if u["role"] == "employee"
     ]
     return (
-        "👥 الموظفون المسجلون:\n" + "\n".join(emps)
+        "الموظفون المسجلون حالياً:\n" + "\n".join(emps)
         if emps
         else "لا يوجد موظفون حالياً."
     )
 
-  if "المهام المعلقة" in t or "مهام قيد التنفيذ" in t:
+  if "المهام المعلقة" in t or "مهام قيد التنفيذ" in t or "شو في مهام" in t:
     pending = [
         f"• {t.get('المهمة', '')} (مسندة لـ: {t.get('username')})"
         for t in st.session_state.tasks_db
         if t.get("الحالة") != "تم"
     ]
     return (
-        "📌 المهام قيد التنفيذ:\n" + "\n".join(pending)
+        "المهام قيد التنفيذ:\n" + "\n".join(pending)
         if pending
-        else "✅ جميع المهام مكتملة."
+        else "جميع المهام مكتملة ولا توجد مهام معلقة."
     )
 
   # 5. الاستعلام من وثائق وملفات الشركة عبر الـ RAG
@@ -675,8 +714,8 @@ def sedra_handle_command(text, rag, admin_user):
 def render_sedra_tab(rag, admin_user):
   st.subheader("🎙️ سيدرا — المساعد الصوتي والوكيل التنفيذي للشركة")
   st.caption(
-      "🔒 واجهة صوتية وكتابية مخصصة للمدير العام: اضغط على زر الذبذبات وتكلم،"
-      " وسيدرا ستستمع لك، تنفذ أوامرك، وترد عليك صوتياً."
+      "🔒 شات فويس تفاعلي مخصص للمدير العام: اضغط على الميكروفون وتكلم،"
+      " وسيدرا ستستمع لك، تنفذ أوامرك، وترد عليك صوتياً وكتابياً."
   )
 
   data = load_sedra_sessions()
@@ -684,12 +723,12 @@ def render_sedra_tab(rag, admin_user):
   if not sessions:
     sessions.append({
         "id": f"s1_{int(datetime.now().timestamp())}",
-        "title": "محادثة تنفيذية مع سيدرا",
+        "title": "محادثة مع سيدرا",
         "messages": [{
             "role": "assistant",
             "content": (
-                f"أهلاً بك يا فندم! أنا سيدرا، سكرتيرتك التنفيذية. تفضل بالضغط"
-                " على الميكروفون وتحدث معي بالصوت، أو اكتب أمرك هنا."
+                f"أهلاً بك يا فندم! أنا سيدرا، سكرتيرتك التنفيذية. تفضل بالتحدث"
+                " معي صوتياً وسأجيبك بالصوت وأدير لك مهام الشركة."
             ),
         }],
     })
@@ -698,7 +737,7 @@ def render_sedra_tab(rag, admin_user):
 
   col_side, col_main = st.columns([1, 2])
 
-  # --- سجل الجلسات وإدارة المحادثات ---
+  # --- القائمة الجانبية لسجل المحادثات ---
   with col_side:
     st.write("#### 📑 سجل المحادثات:")
     if st.button("➕ محادثة جديدة", key="sedra_new", use_container_width=True):
@@ -708,8 +747,7 @@ def render_sedra_tab(rag, admin_user):
           "messages": [{
               "role": "assistant",
               "content": (
-                  "بدأت محادثة جديدة يا فندم، أنا جاهزة للاستماع وتنفيذ"
-                  " الأوامر."
+                  "بدأت محادثة جديدة يا فندم، تفضل بالتحدث معي في أي وقت."
               ),
           }],
       }
@@ -748,198 +786,186 @@ def render_sedra_tab(rag, admin_user):
 
     st.write(f"### 📌 {curr['title']}")
 
-    # 1. صندوق عرض المحادثات المتزامنة
-    chat_box = st.container(height=360)
+    # استقبال الصوت المحول لنص وتمريره فوراً لمعالجة الرد الصوتي
+    incoming = st.query_params.get("sedra_voice_q")
+    if incoming:
+      question = incoming
+      st.query_params.clear()
+
+      if len(curr["messages"]) <= 1:
+        curr["title"] = " ".join(question.split()[:5])
+
+      curr["messages"].append({"role": "user", "content": question})
+
+      with st.spinner("سيدرا تراجع ملفات الشركة وتجهز الرد..."):
+        answer = sedra_handle_command(question, rag, admin_user)
+
+      curr["messages"].append({"role": "assistant", "content": answer})
+      save_sedra_sessions(data)
+
+      # توليد الصوت الحقيقي وتشغيله تلقائياً
+      audio_data = generate_sedra_voice(answer)
+      if audio_data:
+        st.session_state["sedra_audio_play"] = audio_data
+
+      st.rerun()
+
+    # تشغيل الصوت تلقائياً عند وجود إجابة جديدة
+    if st.session_state.get("sedra_audio_play"):
+      st.audio(
+          st.session_state["sedra_audio_play"],
+          format="audio/mp3",
+          autoplay=True,
+      )
+      del st.session_state["sedra_audio_play"]
+
+    # صندوق عرض الشات الكامل
+    chat_box = st.container(height=380)
     with chat_box:
       for m in curr["messages"]:
         with st.chat_message(m["role"]):
           st.write(m["content"])
 
-    # 2. زر الاستماع للرد الصوتي الأخير (في حال تم حظر التشغيل التلقائي من كروم)
-    last_bot_message = None
-    for m in reversed(curr["messages"]):
-      if m["role"] == "assistant":
-        last_bot_message = m["content"]
-        break
-
-    # 3. مكون الميكروفون المطور مع الذبذبات المتحركة وحقن الصوت المباشر
-    last_msg_json = json.dumps(
-        last_bot_message if last_bot_message else "", ensure_ascii=False
-    )
-
-    sedra_voice_ui = f"""
-        <div style="direction: rtl; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0f172a; border-radius: 16px; padding: 14px; border: 1px solid #334155;">
+    # ودجت الميكروفون المباشر مع الذبذبات التفاعلية والإرسال الفوري
+    voice_widget_html = """
+        <div style="direction: rtl; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0f172a; border-radius: 18px; padding: 16px; border: 1px solid #1e293b; box-shadow: 0 4px 20px rgba(0,0,0,0.4);">
             
-            <!-- ذبذبات صوتية متحركة -->
-            <div id="waves" style="display: flex; gap: 5px; height: 35px; align-items: center; margin-bottom: 10px;">
+            <!-- ذبذبات تفاعلية -->
+            <div id="waveBox" style="display: flex; gap: 5px; height: 35px; align-items: center; margin-bottom: 12px;">
                 <div class="bar" style="width: 4px; height: 10px; background: #6366f1; border-radius: 4px; transition: height 0.1s ease;"></div>
                 <div class="bar" style="width: 4px; height: 18px; background: #818cf8; border-radius: 4px; transition: height 0.1s ease;"></div>
-                <div class="bar" style="width: 4px; height: 28px; background: #a855f7; border-radius: 4px; transition: height 0.1s ease;"></div>
+                <div class="bar" style="width: 4px; height: 26px; background: #a855f7; border-radius: 4px; transition: height 0.1s ease;"></div>
                 <div class="bar" style="width: 4px; height: 14px; background: #818cf8; border-radius: 4px; transition: height 0.1s ease;"></div>
-                <div class="bar" style="width: 4px; height: 24px; background: #6366f1; border-radius: 4px; transition: height 0.1s ease;"></div>
-                <div class="bar" style="width: 4px; height: 12px; background: #a855f7; border-radius: 4px; transition: height 0.1s ease;"></div>
+                <div class="bar" style="width: 4px; height: 22px; background: #6366f1; border-radius: 4px; transition: height 0.1s ease;"></div>
             </div>
 
-            <!-- أزرار التحكم: الميكروفون + زر نطق الرد -->
-            <div style="display: flex; align-items: center; gap: 15px;">
-                <button id="micBtn" style="
-                    width: 65px; height: 65px; border-radius: 50%; border: none;
-                    background: radial-gradient(circle, #6366f1, #4338ca);
-                    color: white; font-size: 26px; cursor: pointer;
-                    box-shadow: 0 0 20px rgba(99, 102, 241, 0.6);
-                    transition: transform 0.2s, background 0.2s;">
-                    🎙️
-                </button>
+            <!-- زر المايك النيوني -->
+            <button id="voiceBtn" style="
+                width: 72px; height: 72px; border-radius: 50%; border: none;
+                background: radial-gradient(circle, #6366f1, #4338ca);
+                color: white; font-size: 30px; cursor: pointer;
+                box-shadow: 0 0 22px rgba(99, 102, 241, 0.6);
+                transition: transform 0.2s, background 0.2s;">
+                🎙️
+            </button>
 
-                <button id="speakBtn" style="
-                    padding: 8px 16px; border-radius: 20px; border: 1px solid #4f46e5;
-                    background: #1e1b4b; color: #c7d2fe; font-size: 13px; font-weight: bold; cursor: pointer;">
-                    🔊 نطق الرد الأخير
-                </button>
-            </div>
-
-            <div id="statusTxt" style="color: #94a3b8; font-size: 13px; margin-top: 10px; font-weight: 500;">
-                اضغط على الميكروفون وتكلم مباشرة
+            <div id="infoText" style="color: #94a3b8; font-size: 13px; margin-top: 12px; font-weight: 500;">
+                اضغط على الميكروفون وتكلم وسيدرا سترد عليك صوتياً فوراً
             </div>
         </div>
 
         <script>
-            const micBtn = document.getElementById('micBtn');
-            const speakBtn = document.getElementById('speakBtn');
-            const statusTxt = document.getElementById('statusTxt');
+            const btn = document.getElementById('voiceBtn');
+            const info = document.getElementById('infoText');
             const bars = document.querySelectorAll('.bar');
-            const botReply = {last_msg_json};
-            let waveTimer = null;
+            let isListening = false;
+            let recognition = null;
+            let animTimer = null;
 
-            function animateWave(color) {{
-                clearInterval(waveTimer);
-                bars.forEach(b => b.style.background = color);
-                waveTimer = setInterval(() => {{
-                    bars.forEach(b => {{
+            function startAnim() {
+                clearInterval(animTimer);
+                bars.forEach(b => b.style.background = '#ef4444');
+                animTimer = setInterval(() => {
+                    bars.forEach(b => {
                         b.style.height = (Math.floor(Math.random() * 26) + 8) + 'px';
-                    }});
-                }}, 100);
-            }}
+                    });
+                }, 100);
+            }
 
-            function stopWave() {{
-                clearInterval(waveTimer);
-                bars.forEach((b, i) => {{
+            function stopAnim() {
+                clearInterval(animTimer);
+                bars.forEach((b, i) => {
                     b.style.height = (10 + (i % 3) * 6) + 'px';
                     b.style.background = '#6366f1';
-                }});
-            }}
+                });
+            }
 
-            // دالة نطق الرد الصوتي لسيدرا
-            function speakText(text) {{
-                if (!text) return;
-                try {{
-                    const synth = window.speechSynthesis || (window.parent && window.parent.speechSynthesis);
-                    if (!synth) return;
-                    synth.cancel();
-                    const utter = new SpeechSynthesisUtterance(text);
-                    utter.lang = 'ar-SA';
-                    utter.rate = 1.0;
-                    utter.onstart = () => {{
-                        animateWave('#a855f7');
-                        statusTxt.innerText = '🔊 سيدرا تتحدث إليك الآن...';
-                    }};
-                    utter.onend = () => {{
-                        stopWave();
-                        statusTxt.innerText = 'جاهزة لأمرك القادم، اضغط وتكلم';
-                    }};
-                    synth.speak(utter);
-                }} catch (err) {{
-                    console.error(err);
-                }}
-            }}
+            const win = window.parent || window;
+            const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
 
-            speakBtn.onclick = () => speakText(botReply);
-
-            // تشغيل الميكروفون عبر الصفحة الرئيسية (لتفادي حظر الـ iframe)
-            micBtn.onclick = function() {{
-                const win = window.parent || window;
-                const SR = win.SpeechRecognition || win.webkitSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
-
-                if (!SR) {{
-                    statusTxt.innerText = 'متصفحك لا يدعم التعرف على الصوت. استخدم متصفح Google Chrome.';
+            btn.onclick = function() {
+                if (!SpeechRec) {
+                    info.innerText = 'المتصفح لا يدعم التسجيل المباشر، يرجى استخدام متصفح Google Chrome.';
                     return;
-                }}
+                }
 
-                try {{
-                    const recog = new SR();
-                    recog.lang = 'ar-SA';
-                    recog.interimResults = false;
-                    recog.maxAlternatives = 1;
+                if (isListening) {
+                    if (recognition) recognition.stop();
+                    return;
+                }
 
-                    micBtn.style.transform = 'scale(1.1)';
-                    micBtn.style.background = '#dc2626';
-                    animateWave('#ef4444');
-                    statusTxt.innerText = '🎧 استمع إليك الآن... تفضل بالكلام يا مدير';
+                recognition = new SpeechRec();
+                recognition.lang = 'ar-SA';
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 1;
 
-                    recog.onresult = function(e) {{
-                        const textSpoken = e.results[0][0].transcript;
-                        statusTxt.innerText = 'تم سماعك: ' + textSpoken;
-                        stopWave();
-                        micBtn.style.transform = 'scale(1)';
-                        micBtn.style.background = '#4338ca';
+                recognition.onstart = function() {
+                    isListening = true;
+                    btn.style.transform = 'scale(1.1)';
+                    btn.style.background = '#dc2626';
+                    startAnim();
+                    info.innerText = '🎧 أستمع إليك الآن... تفضل بالكلام يا مدير';
+                };
 
-                        // إرسال النص مباشرة إلى حقل الإدخال في Streamlit والضغط على Enter تلقائياً!
-                        const parentDoc = window.parent.document;
-                        const inputEl = parentDoc.querySelector('textarea[data-testid="stChatInputTextArea"]');
-                        if (inputEl) {{
-                            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-                            nativeSetter.call(inputEl, textSpoken);
-                            inputEl.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                recognition.onresult = function(e) {
+                    const text = e.results[0][0].transcript;
+                    info.innerText = '⚡ تم التقاط صوتك: "' + text + '" - جاري إرساله لسيدرا...';
+                    stopAnim();
+                    btn.style.transform = 'scale(1)';
+                    btn.style.background = '#4338ca';
 
-                            setTimeout(() => {{
-                                const sendBtn = parentDoc.querySelector('button[data-testid="stChatInputSubmitButton"]');
-                                if (sendBtn) {{
-                                    sendBtn.click();
-                                }} else {{
-                                    inputEl.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }}));
-                                }}
-                            }}, 300);
-                        }}
-                    }};
+                    // إرسال فوري إلى بايثون عبر الرابط بدون توقف
+                    const targetUrl = new URL(win.location.href);
+                    targetUrl.searchParams.set('sedra_voice_q', text);
+                    win.location.href = targetUrl.toString();
+                };
 
-                    recog.onerror = function(err) {{
-                        stopWave();
-                        micBtn.style.transform = 'scale(1)';
-                        micBtn.style.background = '#4338ca';
-                        statusTxt.innerText = 'تأكد من السماح بإذن الميكروفون للموقع، ثم حاول مجدداً.';
-                    }};
+                recognition.onerror = function(err) {
+                    isListening = false;
+                    stopAnim();
+                    btn.style.transform = 'scale(1)';
+                    btn.style.background = '#4338ca';
+                    info.innerText = 'يرجى السماح بصلاحية الميكروفون ثم المحاولة مجدداً.';
+                };
 
-                    recog.onend = function() {{
-                        stopWave();
-                        micBtn.style.transform = 'scale(1)';
-                        micBtn.style.background = '#4338ca';
-                    }};
+                recognition.onend = function() {
+                    isListening = false;
+                    stopAnim();
+                    btn.style.transform = 'scale(1)';
+                    btn.style.background = '#4338ca';
+                };
 
-                    recog.start();
-                }} catch (ex) {{
-                    statusTxt.innerText = 'يرجى إعطاء صلاحية الميكروفون لـ localhost في المتصفح.';
-                }}
-            }};
+                recognition.start();
+            };
         </script>
         """
+    st.components.v1.html(voice_widget_html, height=195)
 
-    st.components.v1.html(sedra_voice_ui, height=190)
-
-    # 4. استقبال النص ومعالجته (سواء تم إرساله بالصوت تلقائياً أو كتبه المدير بيده)
+    # حقل إدخال يدوي بالكتابة (إذا رغب المدير بالكتابة، وسيدرا سترد صوتياً أيضاً)
     typed = st.chat_input(
-        "تحدث بالمايك أعلاه أو اكتب أمرك لسيدرا هنا...", key="sedra_text_input"
+        "أو اكتب أمرك هنا وسيدرا ستنفذه وترد عليك صوتياً...",
+        key="sedra_text_input",
     )
     if typed:
       if len(curr["messages"]) <= 1:
         curr["title"] = " ".join(typed.split()[:5])
 
       curr["messages"].append({"role": "user", "content": typed})
-      with st.spinner("سيدرا تنفذ الأمر وتراجع ملفات الشركة..."):
+
+      with st.spinner("سيدرا تنفذ الأمر..."):
         answer = sedra_handle_command(typed, rag, admin_user)
 
       curr["messages"].append({"role": "assistant", "content": answer})
       save_sedra_sessions(data)
+
+      # نطق الرد حتى لو كتبه بالكيبورد
+      audio_data = generate_sedra_voice(answer)
+      if audio_data:
+        st.session_state["sedra_audio_play"] = audio_data
+
       st.rerun()
+
+
 # ==============================================================================
 # إشعارات المهام (توست + عداد أحمر على التبويب + أوقات الإسناد والإنجاز)
 # ==============================================================================
@@ -965,7 +991,11 @@ def check_new_task_completions_for_admin(admin_username):
   for tid in new_ids:
     task = next(t for t in completed_tasks if t["id"] == tid)
     emp = next(
-        (u for u in st.session_state.users_db if u["username"] == task["username"]),
+        (
+            u
+            for u in st.session_state.users_db
+            if u["username"] == task["username"]
+        ),
         None,
     )
     emp_name = emp["name"] if emp else task["username"]
@@ -1165,7 +1195,9 @@ if current_user["role"] == "admin":
   group_unread = count_unread_group(current_user["username"])
   private_unread_total = total_private_unread(current_user["username"])
   chats_badge = group_unread + private_unread_total
-  chats_label = "💬 محادثات الشركة" + (f" 🔴{chats_badge}" if chats_badge else "")
+  chats_label = "💬 محادثات الشركة" + (
+      f" 🔴{chats_badge}" if chats_badge else ""
+  )
 
   (
       tab_faq,
@@ -1187,7 +1219,7 @@ if current_user["role"] == "admin":
       "📁 ملفات الشركة ",
   ])
 
-  # --- تبويب 1: الأسئلة المتوقعة الذكية (مولّدة تلقائياً من الملفات) ---
+  # --- تبويب 1: الأسئلة المتوقعة الذكية ---
   with tab_faq:
     st.subheader("💡 الأسئلة المتوقعة الذكية (مبنية على تحليل ملفات الشركة)")
     st.caption(
@@ -1206,7 +1238,7 @@ if current_user["role"] == "admin":
   with tab_chats:
     render_company_chats_tab(current_user)
 
-  # --- تبويب 4: سيدرا (مساعد صوتي للإدارة) ---
+  # --- تبويب 4: سيدرا (مساعد صوتي تنفيذي للإدارة) ---
   with tab_sedra:
     render_sedra_tab(rag, current_user)
 
@@ -1293,11 +1325,12 @@ if current_user["role"] == "admin":
                   "job_title": new_job,
                   "email": new_email.strip(),
               }
-              # ملاحظة: الموظف الجديد ينضم تلقائياً لقروب الشركة، لأن القروب
-              # محسوب من قائمة الموظفين نفسها في كل مرة (بدون قائمة عضوية منفصلة).
               st.session_state.users_db.append(new_emp)
               save_json(USERS_FILE, st.session_state.users_db)
-              st.success(f"تمت إضافة الموظف '{new_name}' بنجاح، وانضم تلقائياً لقروب الشركة!")
+              st.success(
+                  f"تمت إضافة الموظف '{new_name}' بنجاح، وانضم تلقائياً لقروب"
+                  " الشركة!"
+              )
 
               if send_welcome_mail and new_email.strip():
                 ok, msg_mail = send_employee_email(
@@ -1384,9 +1417,6 @@ if current_user["role"] == "admin":
 
           with btn_col3:
             if st.button("🗑️ حذف الموظف", key=f"del_{emp_id}"):
-              # حذف الموظف يخرجه تلقائياً من قروب الشركة (لأن القروب محسوب
-              # من قائمة الموظفين الحالية)، ومن محادثته الخاصة (تبقى محفوظة
-              # كأرشيف لو رجع نفس username لاحقاً).
               st.session_state.users_db = [
                   u for u in st.session_state.users_db if u["id"] != emp_id
               ]
@@ -1406,7 +1436,9 @@ if current_user["role"] == "admin":
             st.write("")
             if st.button("➕ إرسال المهمة", key=f"btn_task_{emp_id}"):
               if task_text.strip():
-                create_task_for_employee(emp, task_text.strip(), source="من لوحة الإدارة")
+                create_task_for_employee(
+                    emp, task_text.strip(), source="من لوحة الإدارة"
+                )
                 st.success("تم إرسال المهمة بنجاح!")
                 st.rerun()
 
@@ -1426,7 +1458,9 @@ if current_user["role"] == "admin":
             time_info = f"أُسندت: {assigned_at}"
             if completed_at:
               time_info += f" | أُنجزت: {completed_at}"
-            st.write(f"- **{task_desc}** | الحالة: `{task_status}` | {time_info}")
+            st.write(
+                f"- **{task_desc}** | الحالة: `{task_status}` | {time_info}"
+            )
 
   # --- تبويب 7: إعدادات البريد الإلكتروني (SMTP) ---
   with tab_email:
@@ -1463,7 +1497,7 @@ if current_user["role"] == "admin":
         save_json(EMAIL_CONFIG_FILE, st.session_state.email_config)
         st.success("تم حفظ إعدادات البريد بنجاح!")
 
-  # --- تبويب 8: المستندات وإدارتها (عرض مبسّط + حذف بالاسم) ---
+  # --- تبويب 8: المستندات وإدارتها ---
   with tab_docs:
     st.subheader("📁 ملفات الشركة")
 
@@ -1526,6 +1560,7 @@ if current_user["role"] == "admin":
 
       st.success(f"نتيجة الفحص: {msg_sync}")
       st.rerun()
+
 # ==============================================================================
 #                      2. واجهة الموظف (EMPLOYEE DASHBOARD)
 # ==============================================================================
@@ -1538,13 +1573,19 @@ else:
   pending_count = sum(
       1 for t in my_tasks_all if t.get("الحالة", t.get("status")) != "تم"
   )
-  check_new_task_notifications_for_employee(current_user["username"], my_tasks_all)
+  check_new_task_notifications_for_employee(
+      current_user["username"], my_tasks_all
+  )
 
   group_unread = count_unread_group(current_user["username"])
   private_unread = total_private_unread(current_user["username"])
   chats_badge = group_unread + private_unread
-  chats_label = "💬 محادثة الشركة" + (f" 🔴{chats_badge}" if chats_badge else "")
-  tasks_label = "📌 مهامي وتنبيهات الإدارة" + (f" 🔴{pending_count}" if pending_count else "")
+  chats_label = "💬 محادثة الشركة" + (
+      f" 🔴{chats_badge}" if chats_badge else ""
+  )
+  tasks_label = "📌 مهامي وتنبيهات الإدارة" + (
+      f" 🔴{pending_count}" if pending_count else ""
+  )
 
   t0, t_chats, t1, t2, t3 = st.tabs([
       "💡 الأسئلة الشائعة",
@@ -1554,12 +1595,12 @@ else:
       "💬 الشات الذكي لك",
   ])
 
-  # --- تبويب 0: الأسئلة الشائعة الذكية (نفس أسئلة المدير، للعرض فقط) ---
+  # --- تبويب 0: الأسئلة الشائعة الذكية ---
   with t0:
     st.subheader("💡 الأسئلة الشائعة")
     render_smart_faq(rag, allow_generate=False)
 
-  # --- تبويب محادثة الشركة (قروب + خاص مع الإدارة) ---
+  # --- تبويب محادثة الشركة ---
   with t_chats:
     render_company_chats_tab(current_user)
 
