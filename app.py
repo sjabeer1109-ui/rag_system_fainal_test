@@ -1,6 +1,4 @@
-import asyncio
 import base64
-import concurrent.futures
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -11,7 +9,7 @@ import re
 import smtplib
 import time
 from call_center import CallCenterEngine
-import edge_tts
+from openai import OpenAI
 import pandas as pd
 from rag_engine import EnterpriseRAG
 import streamlit as st
@@ -42,6 +40,7 @@ GROUP_STATE_FILE = "group_state.json"
 PRIVATE_CHATS_FILE = "private_chats.json"
 LAST_READ_FILE = "last_read.json"
 SEDRA_CHAT_FILE = "sedra_chat.json"
+SETTINGS_FILE = "settings.json"
 RECORDINGS_DIR = "recordings"
 DOCS_DIR = "documents"
 
@@ -68,7 +67,7 @@ def now_ts():
   return datetime.now().isoformat(timespec="seconds")
 
 
-# دالة فحص الملفات
+# فحص الملفات
 def get_physical_documents():
   found_files = {}
   search_folders = [DOCS_DIR, "."]
@@ -111,7 +110,7 @@ def company_scoped_query(rag, question):
 
 
 # ==============================================================================
-# الأسئلة المتوقعة الذكية (مبنية على تحليل الملفات فعلياً عبر الـ RAG)
+# الأسئلة المتوقعة الذكية (مبنية على تحليل الملفات عبر الـ RAG)
 # ==============================================================================
 def get_docs_signature():
   files = get_physical_documents()
@@ -140,17 +139,15 @@ def generate_smart_faq(rag, num_categories=5, questions_per_category=4):
   try:
     meta_prompt = (
         "بناءً على كل الوثائق والملفات المتوفرة لديك في قاعدة المعرفة فقط،"
-        f" ولّد {num_categories} تصنيفات (فئات مواضيع) تغطي أهم محتويات هذه"
-        f" الملفات، ولكل تصنيف اكتب {questions_per_category} أسئلة يُتوقع أن"
-        " يطرحها عميل أو موظف حول هذا الموضوع تحديداً. أجب فقط بصيغة JSON"
-        " صحيحة وصارمة بدون أي نص أو شرح أو علامات ``` قبلها أو بعدها، بالشكل"
-        ' التالي بالضبط: {"اسم التصنيف الأول": ["السؤال 1", "السؤال 2"],'
-        ' "اسم التصنيف الثاني": ["السؤال 1", "السؤال 2"]}'
+        f" ولّد {num_categories} تصنيفات تغطي أهم محتويات هذه الملفات، ولكل"
+        f" تصنيف اكتب {questions_per_category} أسئلة يُتوقع أن يطرحها عميل أو"
+        " موظف. أجب فقط بصيغة JSON صارمة بدون أي نص إضافي: "
+        '{"اسم التصنيف الأول": ["السؤال 1", "السؤال 2"]}'
     )
     raw = rag.query(meta_prompt)
     categories_questions = _extract_json_object(raw)
   except Exception as e:
-    return False, f"❌ تعذر توليد التصنيفات والأسئلة من الملفات: {str(e)}", None
+    return False, f"❌ تعذر توليد التصنيفات من الملفات: {str(e)}", None
 
   result = {}
   for cat, qs in categories_questions.items():
@@ -166,7 +163,7 @@ def generate_smart_faq(rag, num_categories=5, questions_per_category=4):
       "categories": result,
   }
   save_json(FAQ_CACHE_FILE, cache)
-  return True, "✅ تم توليد الأسئلة الذكية وإجاباتها بنجاح من الملفات الحالية.", cache
+  return True, "✅ تم توليد الأسئلة الذكية بنجاح من الملفات.", cache
 
 
 def load_smart_faq():
@@ -183,17 +180,12 @@ def render_smart_faq(rag, allow_generate=False):
       if cache:
         st.caption(f"🕒 آخر توليد: {cache.get('generated_at', '-')}")
         if cache.get("signature") != current_sig:
-          st.warning(
-              "⚠️ الملفات تغيّرت منذ آخر توليد للأسئلة، يُفضل إعادة التوليد"
-              " ليتم تحديث الأسئلة والإجابات."
-          )
+          st.warning("⚠️ الملفات تغيّرت، يُفضل إعادة التوليد للتحديث.")
       else:
         st.info("لم يتم توليد أسئلة ذكية بعد من الملفات.")
     with col_g2:
       if st.button("🧠 توليد / تحديث الأسئلة من الملفات"):
-        with st.spinner(
-            "جاري تحليل الملفات وتوليد الأسئلة المتوقعة وإجاباتها..."
-        ):
+        with st.spinner("جاري تحليل الملفات وتوليد الأسئلة..."):
           ok, msg, new_cache = generate_smart_faq(rag)
         if ok:
           st.success(msg)
@@ -214,7 +206,7 @@ def render_smart_faq(rag, allow_generate=False):
 
 
 # ==============================================================================
-# الشات الذكي المحفوظ (مشترك بين المدير والموظفين، لكل مستخدم جلساته الخاصة)
+# الشات الذكي المحفوظ
 # ==============================================================================
 def render_chat_tab(rag, username):
   if username not in st.session_state.chats_db:
@@ -280,7 +272,7 @@ def render_chat_tab(rag, username):
 
 
 # ==============================================================================
-# قراءة/تعليم كمقروء + إشعارات (تُستخدم للقروب، المحادثات الخاصة، والمهام)
+# الإشعارات والمحادثات
 # ==============================================================================
 def load_last_read():
   return load_json(LAST_READ_FILE, {})
@@ -301,9 +293,6 @@ def get_last_read(username, channel):
   return load_last_read().get(username, {}).get(channel)
 
 
-# ==============================================================================
-# قروب الشركة الداخلي (زي واتساب) + محادثات خاصة مع الإدارة
-# ==============================================================================
 def load_group_chat():
   return load_json(GROUP_CHAT_FILE, [])
 
@@ -420,10 +409,7 @@ def render_group_chat(current_user):
         save_group_state(state)
         st.rerun()
     if not state.get("open", True):
-      st.warning(
-          "المحادثة مغلقة حالياً من قبل الإدارة (الموظفون لا يقدروا يرسلوا"
-          " رسائل)."
-      )
+      st.warning("المحادثة مغلقة حالياً من قبل الإدارة.")
   else:
     if not state.get("open", True):
       st.warning("🔒 المحادثة مغلقة حالياً من قبل الإدارة.")
@@ -570,40 +556,39 @@ def render_company_chats_tab(current_user):
 
 
 # ==============================================================================
-# دالة توليد صوت سيدرا الحقيقي (متوافقة مع Render & Streamlit Cloud)
+# محرك صوت سيدرا عبر OpenAI Voice API (صوت بشري فخم وطبيعي)
 # ==============================================================================
-def generate_sedra_voice(text):
+def get_openai_client():
+  api_key = os.environ.get("OPENAI_API_KEY")
+  if not api_key:
+    settings = load_json(SETTINGS_FILE, {})
+    api_key = settings.get("openai_api_key")
+  if api_key:
+    return OpenAI(api_key=api_key.strip())
+  return None
+
+
+def generate_openai_speech(text):
+  client = get_openai_client()
+  if not client:
+    return None
   try:
     clean_text = re.sub(r"[^\w\s\u0600-\u06FF،.؟]", "", text).strip()
     if not clean_text:
       return None
-
-    def _worker():
-      new_loop = asyncio.new_event_loop()
-      asyncio.set_event_loop(new_loop)
-
-      async def _tts_task():
-        # صوت أردني نسائي طبيعي ar-JO-SanaNeural (أو ar-SA-ZariyahNeural)
-        communicate = edge_tts.Communicate(clean_text, voice="ar-JO-SanaNeural")
-        audio_bytes = b""
-        async for chunk in communicate.stream():
-          if chunk["type"] == "audio":
-            audio_bytes += chunk["data"]
-        return audio_bytes
-
-      try:
-        return new_loop.run_until_complete(_tts_task())
-      finally:
-        new_loop.close()
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-      return executor.submit(_worker).result()
-  except Exception:
+    # أصوات OpenAI الفخمة: 'nova' أو 'shimmer' (نسائي ممتاز) أو 'alloy'
+    response = client.audio.speech.create(
+        model="tts-1",
+        voice="nova",
+        input=clean_text,
+    )
+    return response.read()
+  except Exception as e:
     return None
 
 
 # ==============================================================================
-# سيدرا — المساعد الصوتي والوكيل التنفيذي للشركة (شات صوتي حقيقي)
+# سيدرا — المساعد الصوتي والوكيل التنفيذي للشركة (ChatGPT Voice Experience)
 # ==============================================================================
 def load_sedra_sessions():
   return load_json(SEDRA_CHAT_FILE, {"sessions": []})
@@ -616,7 +601,7 @@ def save_sedra_sessions(data):
 def sedra_handle_command(text, rag, admin_user):
   t = text.strip()
 
-  # 1. أمر إرسال رسالة لقروب الشركة
+  # 1. إرسال لقروب الشركة
   m = re.search(
       r"(?:ابعث|ارسل|إبعث|أرسل|اكتب|انشر)\s+(?:رسال[ةه]?\s*)?(?:على|في|إلى|الى)?\s*(?:القروب|الجروب|قروب الشركة|جروب الشركة|المجموعة|الشات العام)\s*[:\-]?\s*(.+)",
       t,
@@ -638,7 +623,7 @@ def sedra_handle_command(text, rag, admin_user):
       save_group_chat(msgs)
       return f'حاضر يا مديرنا، تم إرسال رسالتك لقروب الشركة: "{content}"'
 
-  # 2. أمر إرسال رسالة خاصة لموظف محدد
+  # 2. إرسال رسالة خاصة لموظف
   m = re.search(
       r"(?:ابعث|ارسل|إبعث|أرسل|اكتب)\s+(?:رسال[ةه]?\s*)?(?:ل|إلى|الى)\s*([^:\-]+)[:\-]\s*(.+)",
       t,
@@ -664,7 +649,7 @@ def sedra_handle_command(text, rag, admin_user):
     elif not target:
       return f'لم أجد موظفاً باسم "{emp_name_query}" في النظام.'
 
-  # 3. أمر إسناد / تكليف موظف بمهمة
+  # 3. إسناد مهمة لموظف
   m = re.search(
       r"(?:مهم[ةه]|اعطي مهم[ةه]|اسند مهم[ةه]|كلف|تكليف)\s*(?:ل|إلى|الى)?\s*([^:\-]+)[:\-]\s*(.+)",
       t,
@@ -682,7 +667,7 @@ def sedra_handle_command(text, rag, admin_user):
     elif not target:
       return f'لم يتم العثور على الموظف "{emp_name_query}".'
 
-  # 4. استفسارات إدارية سرية للمدير
+  # 4. أسئلة إدارية للمدير
   if "مين الموظفين" in t or "قائمة الموظفين" in t:
     emps = [
         f"• {u['name']} ({u['job_title']})"
@@ -707,16 +692,32 @@ def sedra_handle_command(text, rag, admin_user):
         else "جميع المهام مكتملة ولا توجد مهام معلقة."
     )
 
-  # 5. الاستعلام من وثائق وملفات الشركة عبر الـ RAG
+  # 5. الاستعلام من ملفات الشركة عبر الـ RAG
   return company_scoped_query(rag, t)
 
 
 def render_sedra_tab(rag, admin_user):
-  st.subheader("🎙️ سيدرا — المساعد الصوتي والوكيل التنفيذي للشركة")
-  st.caption(
-      "🔒 شات فويس تفاعلي مخصص للمدير العام: اضغط على الميكروفون وتكلم،"
-      " وسيدرا ستستمع لك، تنفذ أوامرك، وترد عليك صوتياً وكتابياً."
+  st.subheader("🎙️ سيدرا — المساعد الصوتي والوكيل التنفيذي (ChatGPT Voice)")
+
+  # التحقق من مفتاح OpenAI وتوفير حقل لضبطه إن لم يكن موجوداً
+  settings = load_json(SETTINGS_FILE, {})
+  current_key = os.environ.get("OPENAI_API_KEY") or settings.get(
+      "openai_api_key", ""
   )
+
+  with st.expander("🔑 إعدادات الربط الصوتي بـ OpenAI API", expanded=not bool(current_key)):
+    new_key = st.text_input(
+        "أدخل مفتاح OpenAI API Key الخاص بك:",
+        value=current_key,
+        type="password",
+        help="سيتم استخدامه لتشغيل الصوت البشري الحقيقي لسيدرا",
+    )
+    if st.button("💾 حفظ مفتاح OpenAI"):
+      settings["openai_api_key"] = new_key.strip()
+      save_json(SETTINGS_FILE, settings)
+      os.environ["OPENAI_API_KEY"] = new_key.strip()
+      st.success("✅ تم حفظ مفتاح OpenAI بنجاح!")
+      st.rerun()
 
   data = load_sedra_sessions()
   sessions = data.get("sessions", [])
@@ -727,8 +728,8 @@ def render_sedra_tab(rag, admin_user):
         "messages": [{
             "role": "assistant",
             "content": (
-                f"أهلاً بك يا فندم! أنا سيدرا، سكرتيرتك التنفيذية. تفضل بالتحدث"
-                " معي صوتياً وسأجيبك بالصوت وأدير لك مهام الشركة."
+                f"أهلاً بك يا فندم! أنا سيدرا. اضغط على الدائرة الملونة وتحدث"
+                " معي صوتياً، وسأجيبك بصوت بشري كامل وأدير لك مهام الشركة."
             ),
         }],
     })
@@ -737,7 +738,6 @@ def render_sedra_tab(rag, admin_user):
 
   col_side, col_main = st.columns([1, 2])
 
-  # --- القائمة الجانبية لسجل المحادثات ---
   with col_side:
     st.write("#### 📑 سجل المحادثات:")
     if st.button("➕ محادثة جديدة", key="sedra_new", use_container_width=True):
@@ -775,7 +775,6 @@ def render_sedra_tab(rag, admin_user):
         st.success("تم الحذف.")
         st.rerun()
 
-  # --- شاشة الشات والتفاعل الصوتي ---
   with col_main:
     curr = next(
         (s for s in sessions if s["id"] == selected_id),
@@ -786,7 +785,7 @@ def render_sedra_tab(rag, admin_user):
 
     st.write(f"### 📌 {curr['title']}")
 
-    # استقبال الصوت المحول لنص وتمريره فوراً لمعالجة الرد الصوتي
+    # معالجة الصوت المرسل
     incoming = st.query_params.get("sedra_voice_q")
     if incoming:
       question = incoming
@@ -797,20 +796,20 @@ def render_sedra_tab(rag, admin_user):
 
       curr["messages"].append({"role": "user", "content": question})
 
-      with st.spinner("سيدرا تراجع ملفات الشركة وتجهز الرد..."):
+      with st.spinner("سيدرا تفكر وتراجع ملفات الشركة..."):
         answer = sedra_handle_command(question, rag, admin_user)
 
       curr["messages"].append({"role": "assistant", "content": answer})
       save_sedra_sessions(data)
 
-      # توليد الصوت الحقيقي وتشغيله تلقائياً
-      audio_data = generate_sedra_voice(answer)
+      # توليد الصوت البشري عبر OpenAI TTS
+      audio_data = generate_openai_speech(answer)
       if audio_data:
         st.session_state["sedra_audio_play"] = audio_data
 
       st.rerun()
 
-    # تشغيل الصوت تلقائياً عند وجود إجابة جديدة
+    # تشغيل الصوت البشري الحقيقي تلقائياً
     if st.session_state.get("sedra_audio_play"):
       st.audio(
           st.session_state["sedra_audio_play"],
@@ -819,147 +818,136 @@ def render_sedra_tab(rag, admin_user):
       )
       del st.session_state["sedra_audio_play"]
 
-    # صندوق عرض الشات الكامل
-    chat_box = st.container(height=380)
+    # صندوق الشات
+    chat_box = st.container(height=360)
     with chat_box:
       for m in curr["messages"]:
         with st.chat_message(m["role"]):
           st.write(m["content"])
 
-    # ودجت الميكروفون المباشر مع الذبذبات التفاعلية والإرسال الفوري
-    voice_widget_html = """
-        <div style="direction: rtl; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0f172a; border-radius: 18px; padding: 16px; border: 1px solid #1e293b; box-shadow: 0 4px 20px rgba(0,0,0,0.4);">
+    # واجهة ChatGPT Voice: دائرة متوهجة ملونة ثلاثية الأبعاد تنبض وتتفاعل
+    chatgpt_orb_html = """
+        <div style="direction: rtl; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 50%, #1e1b4b 0%, #090d16 100%); border-radius: 24px; padding: 22px; border: 1px solid #312e81; box-shadow: 0 10px 30px rgba(0,0,0,0.6);">
             
-            <!-- ذبذبات تفاعلية -->
-            <div id="waveBox" style="display: flex; gap: 5px; height: 35px; align-items: center; margin-bottom: 12px;">
-                <div class="bar" style="width: 4px; height: 10px; background: #6366f1; border-radius: 4px; transition: height 0.1s ease;"></div>
-                <div class="bar" style="width: 4px; height: 18px; background: #818cf8; border-radius: 4px; transition: height 0.1s ease;"></div>
-                <div class="bar" style="width: 4px; height: 26px; background: #a855f7; border-radius: 4px; transition: height 0.1s ease;"></div>
-                <div class="bar" style="width: 4px; height: 14px; background: #818cf8; border-radius: 4px; transition: height 0.1s ease;"></div>
-                <div class="bar" style="width: 4px; height: 22px; background: #6366f1; border-radius: 4px; transition: height 0.1s ease;"></div>
+            <style>
+                @keyframes pulseGlow {
+                    0% { transform: scale(0.97); box-shadow: 0 0 30px rgba(99, 102, 241, 0.5), inset 0 0 20px rgba(236, 72, 153, 0.4); }
+                    50% { transform: scale(1.05); box-shadow: 0 0 55px rgba(168, 85, 247, 0.8), inset 0 0 35px rgba(59, 130, 246, 0.6); }
+                    100% { transform: scale(0.97); box-shadow: 0 0 30px rgba(99, 102, 241, 0.5), inset 0 0 20px rgba(236, 72, 153, 0.4); }
+                }
+                @keyframes ripple {
+                    0% { transform: scale(1); opacity: 0.8; }
+                    100% { transform: scale(1.6); opacity: 0; }
+                }
+                .listening-active {
+                    animation: pulseGlow 1.4s ease-in-out infinite !important;
+                    background: radial-gradient(circle at 35% 35%, #ec4899, #8b5cf6, #3b82f6) !important;
+                }
+            </style>
+
+            <div style="position: relative; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
+                <div id="rippleRing" style="position: absolute; width: 110px; height: 110px; border-radius: 50%; border: 2px solid #818cf8; opacity: 0; pointer-events: none;"></div>
+                
+                <!-- كرة ChatGPT الملونة النابضة -->
+                <button id="orbBtn" style="
+                    width: 95px; height: 95px; border-radius: 50%; border: none;
+                    background: radial-gradient(circle at 35% 35%, #6366f1, #a855f7 60%, #3b82f6);
+                    cursor: pointer; position: relative; z-index: 10;
+                    box-shadow: 0 0 35px rgba(129, 140, 248, 0.6), inset 0 0 15px rgba(255, 255, 255, 0.4);
+                    transition: all 0.3s ease; outline: none;
+                    display: flex; align-items: center; justify-content: center;">
+                    <span style="font-size: 34px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">🎙️</span>
+                </button>
             </div>
 
-            <!-- زر المايك النيوني -->
-            <button id="voiceBtn" style="
-                width: 72px; height: 72px; border-radius: 50%; border: none;
-                background: radial-gradient(circle, #6366f1, #4338ca);
-                color: white; font-size: 30px; cursor: pointer;
-                box-shadow: 0 0 22px rgba(99, 102, 241, 0.6);
-                transition: transform 0.2s, background 0.2s;">
-                🎙️
-            </button>
-
-            <div id="infoText" style="color: #94a3b8; font-size: 13px; margin-top: 12px; font-weight: 500;">
-                اضغط على الميكروفون وتكلم وسيدرا سترد عليك صوتياً فوراً
+            <div id="orbStatus" style="color: #e2e8f0; font-size: 14px; font-weight: 600; text-align: center; text-shadow: 0 1px 3px rgba(0,0,0,0.5);">
+                اضغط على الدائرة وتكلم مع سيدرا بصوتك
+            </div>
+            <div id="subStatus" style="color: #94a3b8; font-size: 11px; margin-top: 4px;">
+                مدعومة بصوت بشري فخم من OpenAI وموصولة بملفات الشركة
             </div>
         </div>
 
         <script>
-            const btn = document.getElementById('voiceBtn');
-            const info = document.getElementById('infoText');
-            const bars = document.querySelectorAll('.bar');
-            let isListening = false;
-            let recognition = null;
-            let animTimer = null;
-
-            function startAnim() {
-                clearInterval(animTimer);
-                bars.forEach(b => b.style.background = '#ef4444');
-                animTimer = setInterval(() => {
-                    bars.forEach(b => {
-                        b.style.height = (Math.floor(Math.random() * 26) + 8) + 'px';
-                    });
-                }, 100);
-            }
-
-            function stopAnim() {
-                clearInterval(animTimer);
-                bars.forEach((b, i) => {
-                    b.style.height = (10 + (i % 3) * 6) + 'px';
-                    b.style.background = '#6366f1';
-                });
-            }
+            const orb = document.getElementById('orbBtn');
+            const status = document.getElementById('orbStatus');
+            const ring = document.getElementById('rippleRing');
+            let isRec = false;
+            let recog = null;
 
             const win = window.parent || window;
-            const SpeechRec = win.SpeechRecognition || win.webkitSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
+            const SpeechAPI = win.SpeechRecognition || win.webkitSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
 
-            btn.onclick = function() {
-                if (!SpeechRec) {
-                    info.innerText = 'المتصفح لا يدعم التسجيل المباشر، يرجى استخدام متصفح Google Chrome.';
+            orb.onclick = function() {
+                if (!SpeechAPI) {
+                    status.innerText = 'يرجى استخدام متصفح Google Chrome للتحدث الصوتي.';
                     return;
                 }
 
-                if (isListening) {
-                    if (recognition) recognition.stop();
+                if (isRec) {
+                    if (recog) recog.stop();
                     return;
                 }
 
-                recognition = new SpeechRec();
-                recognition.lang = 'ar-SA';
-                recognition.interimResults = false;
-                recognition.maxAlternatives = 1;
+                recog = new SpeechAPI();
+                recog.lang = 'ar-SA';
+                recog.interimResults = false;
 
-                recognition.onstart = function() {
-                    isListening = true;
-                    btn.style.transform = 'scale(1.1)';
-                    btn.style.background = '#dc2626';
-                    startAnim();
-                    info.innerText = '🎧 أستمع إليك الآن... تفضل بالكلام يا مدير';
+                recog.onstart = function() {
+                    isRec = true;
+                    orb.classList.add('listening-active');
+                    ring.style.animation = 'ripple 1.5s linear infinite';
+                    status.innerText = 'سيدرا تستمع إليك كإنسان... تفضل بالحديث';
+                    status.style.color = '#38bdf8';
                 };
 
-                recognition.onresult = function(e) {
-                    const text = e.results[0][0].transcript;
-                    info.innerText = '⚡ تم التقاط صوتك: "' + text + '" - جاري إرساله لسيدرا...';
-                    stopAnim();
-                    btn.style.transform = 'scale(1)';
-                    btn.style.background = '#4338ca';
+                recog.onresult = function(e) {
+                    const spoken = e.results[0][0].transcript;
+                    status.innerText = '⚡ فهمت صوتك: "' + spoken + '"';
+                    orb.classList.remove('listening-active');
+                    ring.style.animation = 'none';
 
-                    // إرسال فوري إلى بايثون عبر الرابط بدون توقف
-                    const targetUrl = new URL(win.location.href);
-                    targetUrl.searchParams.set('sedra_voice_q', text);
-                    win.location.href = targetUrl.toString();
+                    // إرسال فوري إلى المعالجة
+                    const url = new URL(win.location.href);
+                    url.searchParams.set('sedra_voice_q', spoken);
+                    win.location.href = url.toString();
                 };
 
-                recognition.onerror = function(err) {
-                    isListening = false;
-                    stopAnim();
-                    btn.style.transform = 'scale(1)';
-                    btn.style.background = '#4338ca';
-                    info.innerText = 'يرجى السماح بصلاحية الميكروفون ثم المحاولة مجدداً.';
+                recog.onerror = function() {
+                    isRec = false;
+                    orb.classList.remove('listening-active');
+                    ring.style.animation = 'none';
+                    status.innerText = 'تأكد من السماح بالمايكروفون ثم اضغط وتكلم مجدداً.';
+                    status.style.color = '#f87171';
                 };
 
-                recognition.onend = function() {
-                    isListening = false;
-                    stopAnim();
-                    btn.style.transform = 'scale(1)';
-                    btn.style.background = '#4338ca';
+                recog.onend = function() {
+                    isRec = false;
+                    orb.classList.remove('listening-active');
+                    ring.style.animation = 'none';
                 };
 
-                recognition.start();
+                recog.start();
             };
         </script>
         """
-    st.components.v1.html(voice_widget_html, height=195)
+    st.components.v1.html(chatgpt_orb_html, height=225)
 
-    # حقل إدخال يدوي بالكتابة (إذا رغب المدير بالكتابة، وسيدرا سترد صوتياً أيضاً)
-    typed = st.chat_input(
-        "أو اكتب أمرك هنا وسيدرا ستنفذه وترد عليك صوتياً...",
-        key="sedra_text_input",
-    )
+    # إدخال كتابي احتياطي
+    typed = st.chat_input("أو اكتب أمرك هنا...", key="sedra_text_input")
     if typed:
       if len(curr["messages"]) <= 1:
         curr["title"] = " ".join(typed.split()[:5])
 
       curr["messages"].append({"role": "user", "content": typed})
 
-      with st.spinner("سيدرا تنفذ الأمر..."):
+      with st.spinner("سيدرا تفكر وتجهز الرد..."):
         answer = sedra_handle_command(typed, rag, admin_user)
 
       curr["messages"].append({"role": "assistant", "content": answer})
       save_sedra_sessions(data)
 
-      # نطق الرد حتى لو كتبه بالكيبورد
-      audio_data = generate_sedra_voice(answer)
+      audio_data = generate_openai_speech(answer)
       if audio_data:
         st.session_state["sedra_audio_play"] = audio_data
 
@@ -967,7 +955,7 @@ def render_sedra_tab(rag, admin_user):
 
 
 # ==============================================================================
-# إشعارات المهام (توست + عداد أحمر على التبويب + أوقات الإسناد والإنجاز)
+# إشعارات المهام والموظفين
 # ==============================================================================
 def check_new_task_notifications_for_employee(username, my_tasks_all):
   lr = load_last_read()
@@ -1015,13 +1003,9 @@ def send_employee_email(
   port = int(cfg.get("smtp_port", 587))
 
   if not sender or not password:
-    return (
-        False,
-        "⚠️ لم يتم ضبط بريد الإدارة وكلمة مرور التطبيقات في تبويب 'إعدادات"
-        " البريد الإلكتروني'.",
-    )
+    return False, "⚠️ لم يتم ضبط بريد الإدارة في الإعدادات."
   if not to_email or "@" not in to_email:
-    return False, "⚠️ البريد الإلكتروني للموظف غير صالح أو فارغ."
+    return False, "⚠️ البريد الإلكتروني للموظف غير صالح."
 
   try:
     msg = MIMEMultipart()
@@ -1031,20 +1015,18 @@ def send_employee_email(
     if action == "create":
       msg["Subject"] = "بيانات حسابك الجديد في النظام المركزي"
       body = f"""مرحباً {employee_name}،
-تم إنشاء حساب عمل جديد لك في النظام المركزي بالبيانات التالية:
+تم إنشاء حساب عمل جديد لك في النظام المركزي:
 - اسم المستخدم: {username}
 - رمز الدخول (PIN): {pin}
 - المسمى الوظيفي: {job_title}
-رابط النظام: http://localhost:8501
 مع تحيات الإدارة العامة."""
     else:
       msg["Subject"] = "تحديث بيانات حسابك في النظام المركزي"
       body = f"""مرحباً {employee_name}،
-نود إعلامك بأنه تم تحديث بيانات حسابك من قبل الإدارة:
+تم تحديث بيانات حسابك:
 - اسم المستخدم: {username}
 - رمز الدخول (PIN): {pin}
-- المسمى الوظيفي: {job_title}
-إذا لم تكن على علم بهذا التغيير، يرجى مراجعة إدارة النظام فوراً."""
+- المسمى الوظيفي: {job_title}"""
 
     msg.attach(MIMEText(body, "plain", "utf-8"))
     with smtplib.SMTP(server, port) as s:
@@ -1116,7 +1098,7 @@ if "logged_user" not in st.session_state:
 if "real_admin_user" not in st.session_state:
   st.session_state.real_admin_user = None
 
-# شاشة تسجيل الدخول
+# تسجيل الدخول
 if st.session_state.logged_user is None:
   st.title("🔐 تسجيل الدخول إلى النظام ")
   c1, c2, c3 = st.columns(3)
@@ -1141,7 +1123,7 @@ if st.session_state.logged_user is None:
           st.rerun()
         else:
           st.error("بيانات الدخول غير صحيحة.")
-    st.info("💡 ادخل بحسابك تم ارسال معلومات الحساب عبر ايميل الشركة ")
+    st.info("💡 ادخل بحسابك المسجل في النظام.")
   st.stop()
 
 current_user = next(
@@ -1150,9 +1132,7 @@ current_user = next(
     if u["username"] == st.session_state.logged_user
 )
 
-# ==============================================================================
-# الشريط الجانبي (SIDEBAR)
-# ==============================================================================
+# الشريط الجانبي
 with st.sidebar:
   st.write(f"👤 المستخدم الحالي: **{current_user['name']}**")
   role_display = "مدير عام" if current_user["role"] == "admin" else "موظف"
@@ -1221,36 +1201,28 @@ if current_user["role"] == "admin":
 
   # --- تبويب 1: الأسئلة المتوقعة الذكية ---
   with tab_faq:
-    st.subheader("💡 الأسئلة المتوقعة الذكية (مبنية على تحليل ملفات الشركة)")
-    st.caption(
-        "يتم توليد هذه الأسئلة وإجاباتها تلقائياً من تحليل الملفات المرفوعة،"
-        " وتظهر نفسها للموظفين أيضاً."
-    )
+    st.subheader("💡 الأسئلة المتوقعة الذكية")
     render_smart_faq(rag, allow_generate=True)
 
-  # --- تبويب 2: شات المدير الخاص المحفوظ ---
+  # --- تبويب 2: شات المدير الخاص ---
   with tab_mychat:
     st.subheader("💬 شاتي الخاص")
-    st.caption("محادثاتك محفوظة هنا، وتقدر تفتح أكثر من محادثة وترجعلها بأي وقت.")
     render_chat_tab(rag, current_user["username"])
 
-  # --- تبويب 3: محادثات الشركة (قروب عام + خاص) ---
+  # --- تبويب 3: محادثات الشركة ---
   with tab_chats:
     render_company_chats_tab(current_user)
 
-  # --- تبويب 4: سيدرا (مساعد صوتي تنفيذي للإدارة) ---
+  # --- تبويب 4: سيدرا (ChatGPT Voice) ---
   with tab_sedra:
     render_sedra_tab(rag, current_user)
 
-  # --- تبويب 5: سجل المكالمات والتسجيل الحقيقي ---
+  # --- تبويب 5: سجل المكالمات ---
   with tab_recordings:
-    st.subheader("🎧 سجل المكالمات  ")
+    st.subheader("🎧 سجل المكالمات")
     calls = load_json(CALLS_FILE, [])
     if not calls:
-      st.info(
-          "لا توجد مكالمات مسجلة بعد. عند إجراء مكالمة ستظهر هنا"
-          " فوراً."
-      )
+      st.info("لا توجد مكالمات مسجلة بعد.")
 
     for call in reversed(calls):
       call_id = call.get("id")
@@ -1264,19 +1236,12 @@ if current_user["role"] == "admin":
         )
 
         audio_file = call.get("audio_file")
-        st.markdown("#### 🎙️ الاستماع للتسجيل الصوتي المباشر للمكالمة:")
         if audio_file and os.path.exists(audio_file):
           with open(audio_file, "rb") as af:
             st.audio(af.read(), format="audio/webm")
-          st.caption(
-              "✅ هذا التسجيل يتضمن صوت المتصل وصوت الذكاء الاصطناعي معاً بجودة"
-              " كاملة."
-          )
-        else:
-          st.warning("جاري معالجة التسجيل أو لم يتم إغلاق المكالمة بعد.")
 
         if call.get("employee_note"):
-          st.info(f"📝 **رد وملاحظة الموظف:**\n{call.get('employee_note')}")
+          st.info(f"📝 **رد الموظف:**\n{call.get('employee_note')}")
 
         if st.button("🗑️ حذف هذه المكالمة", key=f"del_c_{call_id}"):
           calls = [c for c in calls if c.get("id") != call_id]
@@ -1284,7 +1249,7 @@ if current_user["role"] == "admin":
           st.success("تم الحذف.")
           st.rerun()
 
-  # --- تبويب 6: إدارة الموظفين وتحديث بياناتهم وإرسال الإيميل ---
+  # --- تبويب 6: إدارة الموظفين ---
   with tab_mgmt:
     with st.expander("➕ إضافة موظف جديد إلى النظام", expanded=False):
       with st.form("add_emp_form", clear_on_submit=True):
@@ -1327,10 +1292,7 @@ if current_user["role"] == "admin":
               }
               st.session_state.users_db.append(new_emp)
               save_json(USERS_FILE, st.session_state.users_db)
-              st.success(
-                  f"تمت إضافة الموظف '{new_name}' بنجاح، وانضم تلقائياً لقروب"
-                  " الشركة!"
-              )
+              st.success(f"تمت إضافة الموظف '{new_name}' بنجاح!")
 
               if send_welcome_mail and new_email.strip():
                 ok, msg_mail = send_employee_email(
@@ -1343,12 +1305,10 @@ if current_user["role"] == "admin":
                 )
                 if ok:
                   st.success(msg_mail)
-                else:
-                  st.warning(msg_mail)
               st.rerun()
 
     st.markdown("---")
-    st.subheader("سجلات وبطاقات الموظفين وتعديل البيانات:")
+    st.subheader("سجلات وبطاقات الموظفين:")
     for emp in st.session_state.users_db:
       if emp["role"] == "employee":
         emp_id = emp["id"]
@@ -1376,32 +1336,17 @@ if current_user["role"] == "admin":
 
           btn_col1, btn_col2, btn_col3 = st.columns(3)
           with btn_col1:
-            if st.button(
-                "💾 حفظ وإرسال إيميل بالبيانات", key=f"save_email_{emp_id}"
-            ):
+            if st.button("💾 حفظ البيانات", key=f"save_email_{emp_id}"):
               emp["username"] = u_val.strip()
               emp["pin"] = p_val.strip()
               emp["email"] = e_val.strip()
               emp["job_title"] = j_val.strip()
               save_json(USERS_FILE, st.session_state.users_db)
-              st.success("تم حفظ التعديلات في النظام!")
-
-              ok, msg_info = send_employee_email(
-                  emp["email"],
-                  emp_name,
-                  emp["username"],
-                  emp["pin"],
-                  emp["job_title"],
-                  action="update",
-              )
-              if ok:
-                st.success(msg_info)
-              else:
-                st.warning(msg_info)
+              st.success("تم الحفظ!")
               st.rerun()
 
           with btn_col2:
-            if st.button("📧 إرسال إيميل فقط", key=f"send_only_{emp_id}"):
+            if st.button("📧 إرسال إيميل", key=f"send_only_{emp_id}"):
               ok, msg_info = send_employee_email(
                   emp.get("email", ""),
                   emp_name,
@@ -1412,8 +1357,6 @@ if current_user["role"] == "admin":
               )
               if ok:
                 st.success(msg_info)
-              else:
-                st.warning(msg_info)
 
           with btn_col3:
             if st.button("🗑️ حذف الموظف", key=f"del_{emp_id}"):
@@ -1421,15 +1364,14 @@ if current_user["role"] == "admin":
                   u for u in st.session_state.users_db if u["id"] != emp_id
               ]
               save_json(USERS_FILE, st.session_state.users_db)
-              st.warning(f"تم حذف {emp_name} وإخراجه من قروب الشركة.")
+              st.warning(f"تم حذف {emp_name}.")
               st.rerun()
 
           st.markdown("---")
-
           task_c1, task_c2 = st.columns(2)
           with task_c1:
             task_text = st.text_input(
-                "إسناد مهمة جديدة للموظف:", key=f"task_in_{emp_id}"
+                "إسناد مهمة جديدة:", key=f"task_in_{emp_id}"
             )
           with task_c2:
             st.write("")
@@ -1439,33 +1381,12 @@ if current_user["role"] == "admin":
                 create_task_for_employee(
                     emp, task_text.strip(), source="من لوحة الإدارة"
                 )
-                st.success("تم إرسال المهمة بنجاح!")
+                st.success("تم إرسال المهمة!")
                 st.rerun()
 
-          st.markdown("##### المهام المسندة إليه:")
-          emp_tasks = [
-              t
-              for t in st.session_state.tasks_db
-              if t["username"] == emp["username"]
-          ]
-          if not emp_tasks:
-            st.caption("لا توجد مهام مسندة.")
-          for t in emp_tasks:
-            task_desc = t.get("المهمة", t.get("task", ""))
-            task_status = t.get("الحالة", t.get("status", "قيد التنفيذ"))
-            assigned_at = t.get("assigned_at", "-")
-            completed_at = t.get("completed_at")
-            time_info = f"أُسندت: {assigned_at}"
-            if completed_at:
-              time_info += f" | أُنجزت: {completed_at}"
-            st.write(
-                f"- **{task_desc}** | الحالة: `{task_status}` | {time_info}"
-            )
-
-  # --- تبويب 7: إعدادات البريد الإلكتروني (SMTP) ---
+  # --- تبويب 7: إعدادات البريد ---
   with tab_email:
-    st.subheader("⚙️ إعدادات البريد الإلكتروني للإدارة (SMTP)")
-    st.caption("يتم استخدام هذه الإعدادات لإرسال بيانات الحسابات للموظفين آلياً:")
+    st.subheader("⚙️ إعدادات البريد الإلكتروني (SMTP)")
     with st.form("smtp_config_form"):
       s_email = st.text_input(
           "بريدك الإلكتروني (Gmail):",
@@ -1475,7 +1396,6 @@ if current_user["role"] == "admin":
           "كلمة مرور التطبيقات (App Password):",
           type="password",
           value=st.session_state.email_config.get("sender_password", ""),
-          help="كلمة مرور التطبيقات المكونة من 16 حرفاً من حساب جوجل",
       )
       s_server = st.text_input(
           "خادم SMTP:",
@@ -1495,71 +1415,30 @@ if current_user["role"] == "admin":
             "smtp_port": s_port,
         }
         save_json(EMAIL_CONFIG_FILE, st.session_state.email_config)
-        st.success("تم حفظ إعدادات البريد بنجاح!")
+        st.success("تم الحفظ بنجاح!")
 
-  # --- تبويب 8: المستندات وإدارتها ---
+  # --- تبويب 8: ملفات الشركة ---
   with tab_docs:
     st.subheader("📁 ملفات الشركة")
-
-    st.markdown("#### 📥 رفع ملفات جديدة وحفظها فوراً في مجلد documents:")
     uploaded_files = st.file_uploader(
-        "اختر ملفات PDF أو TXT لإضافتها إلى النظام:",
-        type=["pdf", "txt"],
-        accept_multiple_files=True,
+        "رفع ملفات جديدة:", type=["pdf", "txt"], accept_multiple_files=True
     )
     if uploaded_files:
-      if st.button("🚀 بدء حفظ وفهرسة الملفات المرفوعة"):
+      if st.button("🚀 بدء الحفظ وتحديث الفهرس"):
         with st.spinner("جاري حفظ الملفات وتحديث الفهرس..."):
           for uf in uploaded_files:
             target_path = os.path.join(DOCS_DIR, uf.name)
             with open(target_path, "wb") as f_out:
               f_out.write(uf.read())
           sync_res = rag.sync_documents()
-          st.success("تم حفظ الملفات وتحديث الفهرس بنجاح!")
+          st.success("تم الحفظ وتحديث الفهرس!")
 
-    st.markdown("---")
     physical_files = get_physical_documents()
-    st.markdown("#### 📂 الملفات المتوفرة حالياً:")
     if physical_files:
       for fname in physical_files.keys():
         st.write(f"- 📄 {fname}")
     else:
-      st.info("لا توجد ملفات حالياً.")
-
-    st.markdown("---")
-    st.markdown("#### 🗑️ حذف ملف")
-    del_name = st.text_input("اكتب اسم الملف بالضبط لحذفه:", key="del_file_name")
-    if st.button("🗑️ حذف الملف الآن"):
-      target_info = physical_files.get(del_name.strip())
-      if target_info:
-        try:
-          os.remove(target_info["path"])
-          rag.sync_documents()
-          st.success(f"✅ تم حذف الملف: {del_name.strip()}")
-          st.rerun()
-        except Exception as e:
-          st.error(f"❌ تعذر حذف الملف: {str(e)}")
-      else:
-        st.error("⚠️ لم يتم العثور على ملف بهذا الاسم.")
-
-    st.markdown("---")
-    if st.button("🔄 فحص وتحديث فهرس الملفات الآن"):
-      with st.spinner(
-          "جاري فحص المجلد الرئيسي ومجلد المستندات وتحديث الفهرس..."
-      ):
-        sync_res = rag.sync_documents()
-        if isinstance(sync_res, tuple):
-          success, msg_sync = sync_res
-        else:
-          success = bool(sync_res)
-          msg_sync = (
-              "تم تحديث الفهرس بنجاح."
-              if success
-              else "جميع الملفات مفهرسة مسبقاً."
-          )
-
-      st.success(f"نتيجة الفحص: {msg_sync}")
-      st.rerun()
+      st.info("لا توجد ملفات.")
 
 # ==============================================================================
 #                      2. واجهة الموظف (EMPLOYEE DASHBOARD)
@@ -1595,16 +1474,12 @@ else:
       "💬 الشات الذكي لك",
   ])
 
-  # --- تبويب 0: الأسئلة الشائعة الذكية ---
   with t0:
-    st.subheader("💡 الأسئلة الشائعة")
     render_smart_faq(rag, allow_generate=False)
 
-  # --- تبويب محادثة الشركة ---
   with t_chats:
     render_company_chats_tab(current_user)
 
-  # --- تبويب 1: مكالمات الموظف ---
   with t1:
     calls = load_json(CALLS_FILE, [])
     transferred = [
@@ -1614,58 +1489,34 @@ else:
         and c.get("status") == "محولة للموظف"
     ]
     if not transferred:
-      st.info("🟢 لا توجد مكالمات محولة إليك حالياً.")
+      st.info("🟢 لا توجد مكالمات محولة إليك.")
     for c in transferred:
       cid = c.get("id")
-      st.error(
-          f"🚨 مكالمة محولة من: {c.get('customer_name')} | هاتف:"
-          f" {c.get('customer_phone')}"
-      )
+      st.error(f"🚨 مكالمة من: {c.get('customer_name')}")
       st.write(f"**سؤال العميل:** {c.get('inquiry')}")
-      st.info(f"**الحل المستخرج من الملفات:**\n{c.get('ai_initial_answer')}")
+      st.info(f"**الحل المستخرج:**\n{c.get('ai_initial_answer')}")
 
-      if c.get("audio_file") and os.path.exists(c.get("audio_file")):
-        st.write("🎧 استمع لتسجيل صوت العميل والذكاء الاصطناعي قبل الرد:")
-        with open(c.get("audio_file"), "rb") as f:
-          st.audio(f.read(), format="audio/webm")
-
-      emp_reply_note = st.text_area(
-          "ملاحظات أو رد الموظف على المكالمة:", key=f"reply_{cid}"
-      )
-
-      if st.button("✅ تم الرد وحل المشكلة للعميل", key=f"done_c_{cid}"):
+      if st.button("✅ تم الرد وحل المشكلة", key=f"done_c_{cid}"):
         c["status"] = "تم الحل بواسطة الموظف"
-        c["employee_note"] = emp_reply_note
         save_json(CALLS_FILE, calls)
-        st.success("تم إغلاق التذكرة وتحديث السجل للمدير!")
+        st.success("تم الحل!")
         st.rerun()
 
-  # --- تبويب 2: مهام الموظف ---
   with t2:
     if not my_tasks_all:
-      st.info("لا توجد مهام مسندة إليك.")
-
+      st.info("لا توجد مهام مسندة.")
     for t in my_tasks_all:
       t_id = t["id"]
       task_name = t.get("المهمة", t.get("task", ""))
       task_status = t.get("الحالة", t.get("status", "قيد التنفيذ"))
-      assigned_at = t.get("assigned_at", "-")
-      completed_at = t.get("completed_at")
-      time_info = f"أُسندت: {assigned_at}"
-      if completed_at:
-        time_info += f" | أُنجزت: {completed_at}"
-      st.write(f"📌 **{task_name}** - الحالة: `{task_status}` | {time_info}")
+      st.write(f"📌 **{task_name}** - الحالة: `{task_status}`")
       if task_status != "تم":
-        if st.button(f"✅ تأكيد إنجاز المهمة", key=f"finish_t_{t_id}"):
+        if st.button("✅ تأكيد الإنجاز", key=f"finish_t_{t_id}"):
           t["الحالة"] = "تم"
-          t["status"] = "تم"
           t["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
           save_json(TASKS_FILE, st.session_state.tasks_db)
-          st.success("تم إرسال تأكيد الإنجاز للمدير!")
+          st.success("تم التأكيد!")
           st.rerun()
 
-  # --- تبويب 3: الشات الذكي المحفوظ الخاص بالموظف ---
   with t3:
-    st.subheader("💬 الشات الذكي للاستعلام")
-    st.caption("محادثاتك محفوظة هنا، وتقدر تفتح أكثر من محادثة وترجعلها بأي وقت.")
     render_chat_tab(rag, current_user["username"])
