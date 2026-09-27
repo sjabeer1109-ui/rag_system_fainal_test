@@ -563,6 +563,9 @@ def render_company_chats_tab(current_user):
 # ==============================================================================
 # سيدرا — المساعد الصوتي الخاص بالمدير (سكرتير صوتي تنفيذي لإدارة الشركة)
 # ==============================================================================
+# ==============================================================================
+# سيدرا — المساعد الصوتي الخاص بالمدير (نسخة محسنة تعمل بدون حظر المتصفح)
+# ==============================================================================
 def load_sedra_sessions():
   return load_json(SEDRA_CHAT_FILE, {"sessions": []})
 
@@ -594,7 +597,7 @@ def sedra_handle_command(text, rag, admin_user):
           "pinned": False,
       })
       save_group_chat(msgs)
-      return f'📢 حاضر يا فندم، تم إرسال الرسالة إلى قروب الشركة بنجاح: "{content}"'
+      return f'📢 حاضر يا مديرنا، تم إرسال رسالتك لقروب الشركة فوراً: "{content}"'
 
   # 2. أمر إرسال رسالة خاصة لموظف محدد
   m = re.search(
@@ -618,11 +621,11 @@ def sedra_handle_command(text, rag, admin_user):
       })
       chats[thread_key] = thread
       save_private_chats(chats)
-      return f'✉️ تم إرسال رسالة خاصة للموظف {target["name"]}: "{content}"'
+      return f'✉️ تم إرسال الرسالة الخاصة للموظف {target["name"]}: "{content}"'
     elif not target:
-      return f'⚠️ لم أتمكن من العثور على موظف باسم "{emp_name_query}"، يرجى التأكد من الاسم.'
+      return f'⚠️ لم أجد موظفاً باسم "{emp_name_query}" في النظام.'
 
-  # 3. أمر إسناد / تكليف موظف بمهمة (بصيغ متعددة)
+  # 3. أمر إسناد / تكليف موظف بمهمة
   m = re.search(
       r"(?:مهم[ةه]|اعطي مهم[ةه]|اسند مهم[ةه]|كلف|تكليف)\s*(?:ل|إلى|الى)?\s*([^:\-]+)[:\-]\s*(.+)",
       t,
@@ -636,46 +639,44 @@ def sedra_handle_command(text, rag, admin_user):
     target = find_employee_by_name(emp_name_query)
     if target and task_text:
       create_task_for_employee(target, task_text, source="عبر أوامر سيدرا")
-      return f'📋 تم تكليف الموظف {target["name"]} بالمهمة فوراً: "{task_text}"، وتم إرسال إشعار له.'
+      return f'📋 تم تسجيل المهمة وإسنادها للموظف {target["name"]}: "{task_text}"'
     elif not target:
-      return f'⚠️ لم أجد موظفاً يطابق "{emp_name_query}" لإسناد المهمة إليه.'
+      return f'⚠️ لم يتم العثور على الموظف "{emp_name_query}" لإسناد المهمة.'
 
-  # 4. استفسارات إدارية وسرية خاصة بالمدير
+  # 4. أسئلة إدارية سريعة وخاصة بالمدير
   if "مين الموظفين" in t or "قائمة الموظفين" in t:
     emps = [
-        f"• {u['name']} ({u['job_title']}) - بريد: {u.get('email', '-')}"
+        f"• {u['name']} ({u['job_title']})"
         for u in st.session_state.users_db
         if u["role"] == "employee"
     ]
     return (
-        "👥 الموظفون المسجلون في النظام حالياً:\n"
-        + "\n".join(emps)
+        "👥 الموظفون المسجلون:\n" + "\n".join(emps)
         if emps
-        else "لا يوجد موظفون مسجلون حالياً."
+        else "لا يوجد موظفون حالياً."
     )
 
-  if "المهام المعلقة" in t or "مهام قيد التنفيذ" in t or "شو في مهام" in t:
+  if "المهام المعلقة" in t or "مهام قيد التنفيذ" in t:
     pending = [
         f"• {t.get('المهمة', '')} (مسندة لـ: {t.get('username')})"
         for t in st.session_state.tasks_db
         if t.get("الحالة") != "تم"
     ]
     return (
-        "📌 المهام التي لا تزال قيد التنفيذ:\n" + "\n".join(pending)
+        "📌 المهام قيد التنفيذ:\n" + "\n".join(pending)
         if pending
-        else "✅ جميع المهام منجزة ولا توجد مهام معلقة."
+        else "✅ جميع المهام مكتملة."
     )
 
-  # 5. الإجابة بالاعتماد على قاعدة معرفة وملفات الشركة السرية (RAG)
+  # 5. الاستعلام من وثائق وملفات الشركة عبر الـ RAG
   return company_scoped_query(rag, t)
 
 
 def render_sedra_tab(rag, admin_user):
-  st.subheader("🎙️ سيدرا — السكرتيرة والوكيلة الذكية للإدارة العليا")
+  st.subheader("🎙️ سيدرا — المساعد الصوتي والوكيل التنفيذي للشركة")
   st.caption(
-      "🔒 واجهة صوتية تنفيذية مخصصة للمدير العام: اضغط على ذبذبات الميكروفون"
-      " وتحدث مباشرة لتكليف موظف، إرسال رسالة، أو مراجعة معلومات الشركة"
-      " الحساسة."
+      "🔒 واجهة صوتية وكتابية مخصصة للمدير العام: اضغط على زر الذبذبات وتكلم،"
+      " وسيدرا ستستمع لك، تنفذ أوامرك، وترد عليك صوتياً."
   )
 
   data = load_sedra_sessions()
@@ -683,13 +684,12 @@ def render_sedra_tab(rag, admin_user):
   if not sessions:
     sessions.append({
         "id": f"s1_{int(datetime.now().timestamp())}",
-        "title": "محادثة تنفيذية جديدة",
+        "title": "محادثة تنفيذية مع سيدرا",
         "messages": [{
             "role": "assistant",
             "content": (
-                f"مرحباً بك يا حضرة المدير {admin_user['name']}! أنا سيدرا،"
-                " سكرتيرتك التنفيذية. تفضل بالضغط على أيقونة الذبذبات وتحدث معي"
-                " صوتياً في أي وقت."
+                f"أهلاً بك يا فندم! أنا سيدرا، سكرتيرتك التنفيذية. تفضل بالضغط"
+                " على الميكروفون وتحدث معي بالصوت، أو اكتب أمرك هنا."
             ),
         }],
     })
@@ -698,9 +698,9 @@ def render_sedra_tab(rag, admin_user):
 
   col_side, col_main = st.columns([1, 2])
 
-  # --- القائمة الجانبية لسجل محادثات سيدرا ---
+  # --- سجل الجلسات وإدارة المحادثات ---
   with col_side:
-    st.write("#### 📑 جلسات ومحادثات سيدرا:")
+    st.write("#### 📑 سجل المحادثات:")
     if st.button("➕ محادثة جديدة", key="sedra_new", use_container_width=True):
       new_sess = {
           "id": f"s{len(sessions) + 1}_{int(datetime.now().timestamp())}",
@@ -708,8 +708,8 @@ def render_sedra_tab(rag, admin_user):
           "messages": [{
               "role": "assistant",
               "content": (
-                  "أهلاً بك مجدداً يا فندم. بدأت جلسة جديدة ومستعدة لتلقي أوامرك"
-                  " أو الإجابة على استفساراتك."
+                  "بدأت محادثة جديدة يا فندم، أنا جاهزة للاستماع وتنفيذ"
+                  " الأوامر."
               ),
           }],
       }
@@ -720,7 +720,7 @@ def render_sedra_tab(rag, admin_user):
 
     sess_map = {s["id"]: s["title"] for s in sessions}
     selected_id = st.radio(
-        "اختر الجلسة:",
+        "اختر المحادثة:",
         list(sess_map.keys()),
         format_func=lambda x: f"🗨️ {sess_map[x]}",
         key="sedra_radio",
@@ -734,334 +734,212 @@ def render_sedra_tab(rag, admin_user):
       if len(sessions) > 1:
         data["sessions"] = [s for s in sessions if s["id"] != selected_id]
         save_sedra_sessions(data)
-        st.success("تم حذف الجلسة بنجاح.")
+        st.success("تم الحذف.")
         st.rerun()
-      else:
-        st.warning("لا يمكنك حذف الجلسة الوحيدة المتبقية.")
 
-  # --- شاشة التفاعل الصوتي والشات المباشر ---
+  # --- شاشة الشات والتفاعل الصوتي ---
   with col_main:
     curr = next(
         (s for s in sessions if s["id"] == selected_id),
         sessions[0] if sessions else None,
     )
     if not curr:
-      st.info("لا توجد محادثة محددة.")
       return
 
     st.write(f"### 📌 {curr['title']}")
 
-    # استقبال الصوت المحول لنص عبر الرابط
-    incoming = st.query_params.get("sedra_q")
-    if incoming:
-      question = incoming
-      st.query_params.clear()
-      if (
-          len(curr["messages"]) <= 1
-      ):  # تحديث اسم المحادثة تلقائياً بناءً على أول جملة
-        curr["title"] = " ".join(question.split()[:5])
-
-      curr["messages"].append({"role": "user", "content": question})
-      with st.spinner("سيدرا تراجع ملفات الشركة وتنفذ الإجراء..."):
-        answer = sedra_handle_command(question, rag, admin_user)
-
-      curr["messages"].append({"role": "assistant", "content": answer})
-      save_sedra_sessions(data)
-      st.session_state["sedra_last_answer"] = answer
-      st.rerun()
-
-    # صندوق عرض الشات الكامل
-    chat_box = st.container(height=380)
+    # 1. صندوق عرض المحادثات المتزامنة
+    chat_box = st.container(height=360)
     with chat_box:
       for m in curr["messages"]:
         with st.chat_message(m["role"]):
           st.write(m["content"])
 
-    last_answer = st.session_state.get("sedra_last_answer", "")
-    last_answer_js = json.dumps(last_answer, ensure_ascii=False)
+    # 2. زر الاستماع للرد الصوتي الأخير (في حال تم حظر التشغيل التلقائي من كروم)
+    last_bot_message = None
+    for m in reversed(curr["messages"]):
+      if m["role"] == "assistant":
+        last_bot_message = m["content"]
+        break
 
-    # ودجت الذبذبات والتسجيل الصوتي (HTML + CSS Waveform + Web Speech API)
-    voice_html = f"""
-    <div style="direction: rtl; font-family: system-ui, -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); padding: 18px; border-radius: 20px; border: 1px solid #312e81; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5);">
-        
-        <!-- صندوق الذبذبات الصوتية التفاعلية -->
-        <div id="waveContainer" style="display: flex; align-items: center; justify-content: center; gap: 6px; height: 46px; margin-bottom: 12px; padding: 0 20px; background: rgba(15, 23, 42, 0.6); border-radius: 9999px; border: 1px solid #3730a3;">
-            <div class="w-bar" style="width: 5px; height: 12px; background: #6366f1; border-radius: 99px; transition: height 0.1s ease;"></div>
-            <div class="w-bar" style="width: 5px; height: 20px; background: #818cf8; border-radius: 99px; transition: height 0.1s ease;"></div>
-            <div class="w-bar" style="width: 5px; height: 32px; background: #a855f7; border-radius: 99px; transition: height 0.1s ease;"></div>
-            <div class="w-bar" style="width: 5px; height: 16px; background: #c084fc; border-radius: 99px; transition: height 0.1s ease;"></div>
-            <div class="w-bar" style="width: 5px; height: 28px; background: #818cf8; border-radius: 99px; transition: height 0.1s ease;"></div>
-            <div class="w-bar" style="width: 5px; height: 14px; background: #6366f1; border-radius: 99px; transition: height 0.1s ease;"></div>
+    # 3. مكون الميكروفون المطور مع الذبذبات المتحركة وحقن الصوت المباشر
+    last_msg_json = json.dumps(
+        last_bot_message if last_bot_message else "", ensure_ascii=False
+    )
+
+    sedra_voice_ui = f"""
+        <div style="direction: rtl; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #0f172a; border-radius: 16px; padding: 14px; border: 1px solid #334155;">
+            
+            <!-- ذبذبات صوتية متحركة -->
+            <div id="waves" style="display: flex; gap: 5px; height: 35px; align-items: center; margin-bottom: 10px;">
+                <div class="bar" style="width: 4px; height: 10px; background: #6366f1; border-radius: 4px; transition: height 0.1s ease;"></div>
+                <div class="bar" style="width: 4px; height: 18px; background: #818cf8; border-radius: 4px; transition: height 0.1s ease;"></div>
+                <div class="bar" style="width: 4px; height: 28px; background: #a855f7; border-radius: 4px; transition: height 0.1s ease;"></div>
+                <div class="bar" style="width: 4px; height: 14px; background: #818cf8; border-radius: 4px; transition: height 0.1s ease;"></div>
+                <div class="bar" style="width: 4px; height: 24px; background: #6366f1; border-radius: 4px; transition: height 0.1s ease;"></div>
+                <div class="bar" style="width: 4px; height: 12px; background: #a855f7; border-radius: 4px; transition: height 0.1s ease;"></div>
+            </div>
+
+            <!-- أزرار التحكم: الميكروفون + زر نطق الرد -->
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <button id="micBtn" style="
+                    width: 65px; height: 65px; border-radius: 50%; border: none;
+                    background: radial-gradient(circle, #6366f1, #4338ca);
+                    color: white; font-size: 26px; cursor: pointer;
+                    box-shadow: 0 0 20px rgba(99, 102, 241, 0.6);
+                    transition: transform 0.2s, background 0.2s;">
+                    🎙️
+                </button>
+
+                <button id="speakBtn" style="
+                    padding: 8px 16px; border-radius: 20px; border: 1px solid #4f46e5;
+                    background: #1e1b4b; color: #c7d2fe; font-size: 13px; font-weight: bold; cursor: pointer;">
+                    🔊 نطق الرد الأخير
+                </button>
+            </div>
+
+            <div id="statusTxt" style="color: #94a3b8; font-size: 13px; margin-top: 10px; font-weight: 500;">
+                اضغط على الميكروفون وتكلم مباشرة
+            </div>
         </div>
 
-        <!-- زر الميكروفون الرئيسي المضاء -->
-        <button id="sedraMicBtn" style="
-            width: 74px; height: 74px; border-radius: 50%; border: none;
-            background: radial-gradient(circle at 35% 35%, #818cf8, #4f46e5 70%, #312e81);
-            color: white; font-size: 28px; cursor: pointer;
-            box-shadow: 0 0 25px rgba(99, 102, 241, 0.6);
-            display: flex; align-items: center; justify-content: center;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            outline: none;">
-            🎙️
-        </button>
+        <script>
+            const micBtn = document.getElementById('micBtn');
+            const speakBtn = document.getElementById('speakBtn');
+            const statusTxt = document.getElementById('statusTxt');
+            const bars = document.querySelectorAll('.bar');
+            const botReply = {last_msg_json};
+            let waveTimer = null;
 
-        <!-- نص الحالة وتفريغ الكلام المباشر -->
-        <div id="sedraStatus" style="margin-top: 12px; font-size: 13px; color: #cbd5e1; font-weight: 500; text-align: center;">
-            اضغط على الميكروفون وتكلم مباشرة مع سيدرا
-        </div>
-    </div>
+            function animateWave(color) {{
+                clearInterval(waveTimer);
+                bars.forEach(b => b.style.background = color);
+                waveTimer = setInterval(() => {{
+                    bars.forEach(b => {{
+                        b.style.height = (Math.floor(Math.random() * 26) + 8) + 'px';
+                    }});
+                }}, 100);
+            }}
 
-    <script>
-      const btn = document.getElementById('sedraMicBtn');
-      const status = document.getElementById('sedraStatus');
-      const bars = document.querySelectorAll('.w-bar');
-      const lastAnswer = {last_answer_js};
-      let waveInterval = null;
-      let isRecording = false;
+            function stopWave() {{
+                clearInterval(waveTimer);
+                bars.forEach((b, i) => {{
+                    b.style.height = (10 + (i % 3) * 6) + 'px';
+                    b.style.background = '#6366f1';
+                }});
+            }}
 
-      function startWaveAnimation(color) {{
-        clearInterval(waveInterval);
-        bars.forEach(b => b.style.backgroundColor = color);
-        waveInterval = setInterval(() => {{
-          bars.forEach(b => {{
-            const h = Math.floor(Math.random() * 32) + 8;
-            b.style.height = h + 'px';
-          }});
-        }}, 110);
-      }}
+            // دالة نطق الرد الصوتي لسيدرا
+            function speakText(text) {{
+                if (!text) return;
+                try {{
+                    const synth = window.speechSynthesis || (window.parent && window.parent.speechSynthesis);
+                    if (!synth) return;
+                    synth.cancel();
+                    const utter = new SpeechSynthesisUtterance(text);
+                    utter.lang = 'ar-SA';
+                    utter.rate = 1.0;
+                    utter.onstart = () => {{
+                        animateWave('#a855f7');
+                        statusTxt.innerText = '🔊 سيدرا تتحدث إليك الآن...';
+                    }};
+                    utter.onend = () => {{
+                        stopWave();
+                        statusTxt.innerText = 'جاهزة لأمرك القادم، اضغط وتكلم';
+                    }};
+                    synth.speak(utter);
+                }} catch (err) {{
+                    console.error(err);
+                }}
+            }}
 
-      function stopWaveAnimation() {{
-        clearInterval(waveInterval);
-        bars.forEach((b, i) => {{
-          b.style.height = (12 + (i % 3) * 8) + 'px';
-          b.style.backgroundColor = '#6366f1';
-        }});
-      }}
+            speakBtn.onclick = () => speakText(botReply);
 
-      // نطق إجابة سيدرا صوتياً للمدير فور الرد
-      function speak(text) {{
-        if (!text) return;
-        try {{
-          const utter = new SpeechSynthesisUtterance(text);
-          utter.lang = 'ar-SA';
-          utter.rate = 1.05;
-          utter.onstart = () => {{
-            startWaveAnimation('#a855f7');
-            status.innerText = '🔊 سيدرا تجيب عليك الآن صوتياً...';
-          }};
-          utter.onend = () => {{
-            stopWaveAnimation();
-            status.innerText = 'جاهزة لأمرك القادم، اضغط للتحدث';
-          }};
-          utter.onerror = () => stopWaveAnimation();
-          window.parent.speechSynthesis.cancel();
-          window.parent.speechSynthesis.speak(utter);
-        }} catch (e) {{}}
-      }}
+            // تشغيل الميكروفون عبر الصفحة الرئيسية (لتفادي حظر الـ iframe)
+            micBtn.onclick = function() {{
+                const win = window.parent || window;
+                const SR = win.SpeechRecognition || win.webkitSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
 
-      if (lastAnswer) {{
-        speak(lastAnswer);
-      }}
+                if (!SR) {{
+                    statusTxt.innerText = 'متصفحك لا يدعم التعرف على الصوت. استخدم متصفح Google Chrome.';
+                    return;
+                }}
 
-      btn.addEventListener('click', function() {{
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SR) {{
-          status.innerText = 'المتصفح لا يدعم الميكروفون المباشر، يرجى استخدام Google Chrome.';
-          return;
-        }}
+                try {{
+                    const recog = new SR();
+                    recog.lang = 'ar-SA';
+                    recog.interimResults = false;
+                    recog.maxAlternatives = 1;
 
-        const recog = new SR();
-        recog.lang = 'ar-SA';
-        recog.interimResults = true;
-        recog.maxAlternatives = 1;
+                    micBtn.style.transform = 'scale(1.1)';
+                    micBtn.style.background = '#dc2626';
+                    animateWave('#ef4444');
+                    statusTxt.innerText = '🎧 استمع إليك الآن... تفضل بالكلام يا مدير';
 
-        btn.style.transform = 'scale(1.1)';
-        btn.style.boxShadow = '0 0 35px rgba(239, 68, 68, 0.8)';
-        btn.style.background = 'radial-gradient(circle at 35% 35%, #f87171, #dc2626)';
-        startWaveAnimation('#ef4444');
-        status.innerText = '🎧 استمع إليك الآن... تفضل بالكلام يا مدير';
+                    recog.onresult = function(e) {{
+                        const textSpoken = e.results[0][0].transcript;
+                        statusTxt.innerText = 'تم سماعك: ' + textSpoken;
+                        stopWave();
+                        micBtn.style.transform = 'scale(1)';
+                        micBtn.style.background = '#4338ca';
 
-        recog.onresult = function(e) {{
-          let transcript = '';
-          for (let i = e.resultIndex; i < e.results.length; i++) {{
-            transcript += e.results[i][0].transcript;
-          }}
-          status.innerText = '✍️ جاري الاستماع: ' + transcript;
-          
-          if (e.results[0].isFinal) {{
-            status.innerText = '⚡ جاري المعالجة والإرسال لسيدرا...';
-            stopWaveAnimation();
-            const url = new URL(window.parent.location.href);
-            url.searchParams.set('sedra_q', transcript);
-            window.parent.location.href = url.toString();
-          }}
-        }};
+                        // إرسال النص مباشرة إلى حقل الإدخال في Streamlit والضغط على Enter تلقائياً!
+                        const parentDoc = window.parent.document;
+                        const inputEl = parentDoc.querySelector('textarea[data-testid="stChatInputTextArea"]');
+                        if (inputEl) {{
+                            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+                            nativeSetter.call(inputEl, textSpoken);
+                            inputEl.dispatchEvent(new Event('input', {{ bubbles: true }}));
 
-        recog.onerror = function(e) {{
-          stopWaveAnimation();
-          btn.style.transform = 'scale(1)';
-          btn.style.background = 'radial-gradient(circle at 35% 35%, #818cf8, #4f46e5 70%, #312e81)';
-          btn.style.boxShadow = '0 0 25px rgba(99, 102, 241, 0.6)';
-          status.innerText = 'لم يتم التقاط الصوت بوضوح، اضغط وجرب مجدداً.';
-        }};
+                            setTimeout(() => {{
+                                const sendBtn = parentDoc.querySelector('button[data-testid="stChatInputSubmitButton"]');
+                                if (sendBtn) {{
+                                    sendBtn.click();
+                                }} else {{
+                                    inputEl.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }}));
+                                }}
+                            }}, 300);
+                        }}
+                    }};
 
-        recog.onend = function() {{
-          btn.style.transform = 'scale(1)';
-          btn.style.background = 'radial-gradient(circle at 35% 35%, #818cf8, #4f46e5 70%, #312e81)';
-          btn.style.boxShadow = '0 0 25px rgba(99, 102, 241, 0.6)';
-          stopWaveAnimation();
-        }};
+                    recog.onerror = function(err) {{
+                        stopWave();
+                        micBtn.style.transform = 'scale(1)';
+                        micBtn.style.background = '#4338ca';
+                        statusTxt.innerText = 'تأكد من السماح بإذن الميكروفون للموقع، ثم حاول مجدداً.';
+                    }};
 
-        recog.start();
-      }});
-    </script>
-    """
-    st.components.v1.html(voice_html, height=230)
+                    recog.onend = function() {{
+                        stopWave();
+                        micBtn.style.transform = 'scale(1)';
+                        micBtn.style.background = '#4338ca';
+                    }};
 
-    # حقل الإدخال النصي البديل (في حال فضل المدير الكتابة)
-    typed = st.chat_input("أو اكتب لسيدرا كتابة هنا...", key="sedra_text_input")
+                    recog.start();
+                }} catch (ex) {{
+                    statusTxt.innerText = 'يرجى إعطاء صلاحية الميكروفون لـ localhost في المتصفح.';
+                }}
+            }};
+        </script>
+        """
+
+    st.components.v1.html(sedra_voice_ui, height=190)
+
+    # 4. استقبال النص ومعالجته (سواء تم إرساله بالصوت تلقائياً أو كتبه المدير بيده)
+    typed = st.chat_input(
+        "تحدث بالمايك أعلاه أو اكتب أمرك لسيدرا هنا...", key="sedra_text_input"
+    )
     if typed:
       if len(curr["messages"]) <= 1:
         curr["title"] = " ".join(typed.split()[:5])
 
       curr["messages"].append({"role": "user", "content": typed})
-      with st.spinner("سيدرا تراجع ملفات الشركة وتنفذ الإجراء..."):
+      with st.spinner("سيدرا تنفذ الأمر وتراجع ملفات الشركة..."):
         answer = sedra_handle_command(typed, rag, admin_user)
 
       curr["messages"].append({"role": "assistant", "content": answer})
       save_sedra_sessions(data)
-      st.session_state["sedra_last_answer"] = answer
       st.rerun()
-
-
-def render_sedra_tab(rag, admin_user):
-  st.subheader("🎙️ سيدرا — المساعد الصوتي للإدارة")
-  st.caption(
-      "اضغط على الدائرة وتكلم، وسيدرا بيسمعك ويرد عليك صوتياً، وبيقدر يبعت"
-      " رسائل للقروب أو لموظف معيّن ويسند مهام مباشرة بالحكي أو الكتابة."
-      " (يعمل بشكل أفضل على متصفح Chrome)"
-  )
-
-  data = load_sedra_sessions()
-  sessions = data["sessions"]
-  if not sessions:
-    sessions.append({
-        "id": f"s1_{int(datetime.now().timestamp())}",
-        "title": "محادثة مع سيدرا",
-        "messages": [],
-    })
-    save_sedra_sessions(data)
-
-  col_side, col_main = st.columns([1, 2])
-  with col_side:
-    st.write("#### 📑 محادثاتك مع سيدرا:")
-    if st.button("➕ محادثة جديدة", key="sedra_new"):
-      sessions.append({
-          "id": f"s{len(sessions) + 1}_{int(datetime.now().timestamp())}",
-          "title": f"محادثة #{len(sessions) + 1}",
-          "messages": [],
-      })
-      save_sedra_sessions(data)
-      st.rerun()
-    sess_map = {s["id"]: s["title"] for s in sessions}
-    selected_id = st.radio(
-        "اختر محادثة:",
-        list(sess_map.keys()),
-        format_func=lambda x: f"🗨️ {sess_map[x]}",
-        key="sedra_radio",
-    )
-
-  with col_main:
-    curr = next(s for s in sessions if s["id"] == selected_id)
-    st.write(f"### 📌 {curr['title']}")
-
-    incoming = st.query_params.get("sedra_q")
-    if incoming:
-      question = incoming
-      st.query_params.clear()
-      if not curr["messages"]:
-        curr["title"] = " ".join(question.split()[:5])
-      curr["messages"].append({"role": "user", "content": question})
-      with st.spinner("سيدرا بيفكر..."):
-        answer = sedra_handle_command(question, rag, admin_user)
-      curr["messages"].append({"role": "assistant", "content": answer})
-      save_sedra_sessions(data)
-      st.session_state["sedra_last_answer"] = answer
-
-    for m in curr["messages"]:
-      with st.chat_message(m["role"]):
-        st.write(m["content"])
-
-    last_answer = st.session_state.get("sedra_last_answer", "")
-    last_answer_js = json.dumps(last_answer, ensure_ascii=False)
-
-    voice_html = f"""
-    <div style="display:flex; flex-direction:column; align-items:center; padding:16px;">
-      <button id="sedraBtn" style="
-          width:100px; height:100px; border-radius:50%; border:none;
-          background:radial-gradient(circle at 30% 30%, #7c5cff, #4b2fd1);
-          color:white; font-size:32px; cursor:pointer; box-shadow:0 0 22px rgba(124,92,255,.55);">
-        🎙️
-      </button>
-      <div id="sedraStatus" style="margin-top:10px; font-family:sans-serif; color:#888;">اضغط وتكلم</div>
-    </div>
-    <script>
-      const btn = document.getElementById('sedraBtn');
-      const status = document.getElementById('sedraStatus');
-      const lastAnswer = {last_answer_js};
-
-      function speak(text) {{
-        if (!text) return;
-        try {{
-          const utter = new SpeechSynthesisUtterance(text);
-          utter.lang = 'ar-SA';
-          window.parent.speechSynthesis.cancel();
-          window.parent.speechSynthesis.speak(utter);
-        }} catch (e) {{}}
-      }}
-      if (lastAnswer) {{ speak(lastAnswer); }}
-
-      btn.addEventListener('click', function() {{
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SR) {{
-          status.innerText = 'المتصفح لا يدعم التعرف على الصوت (استخدم Chrome)';
-          return;
-        }}
-        const recog = new SR();
-        recog.lang = 'ar-SA';
-        recog.interimResults = false;
-        recog.maxAlternatives = 1;
-        status.innerText = '🎧 بسمعك الآن...';
-        recog.start();
-        recog.onresult = function(e) {{
-          const text = e.results[0][0].transcript;
-          status.innerText = 'جاري الإرسال: ' + text;
-          const url = new URL(window.parent.location.href);
-          url.searchParams.set('sedra_q', text);
-          window.parent.location.href = url.toString();
-        }};
-        recog.onerror = function(e) {{
-          status.innerText = 'صار خطأ، جرب مرة ثانية';
-        }};
-      }});
-    </script>
-    """
-    st.components.v1.html(voice_html, height=210)
-
-    typed = st.chat_input("أو اكتب لسيدرا بدل الحكي...", key="sedra_text_input")
-    if typed:
-      if not curr["messages"]:
-        curr["title"] = " ".join(typed.split()[:5])
-      curr["messages"].append({"role": "user", "content": typed})
-      with st.spinner("سيدرا بيفكر..."):
-        answer = sedra_handle_command(typed, rag, admin_user)
-      curr["messages"].append({"role": "assistant", "content": answer})
-      save_sedra_sessions(data)
-      st.session_state["sedra_last_answer"] = answer
-      st.rerun()
-
-
 # ==============================================================================
 # إشعارات المهام (توست + عداد أحمر على التبويب + أوقات الإسناد والإنجاز)
 # ==============================================================================
