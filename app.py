@@ -31,6 +31,7 @@ TASKS_FILE = "tasks.json"
 CALLS_FILE = "calls.json"
 CHATS_FILE = "chats.json"
 EMAIL_CONFIG_FILE = "email_config.json"
+FAQ_CACHE_FILE = "smart_faq.json"
 RECORDINGS_DIR = "recordings"
 DOCS_DIR = "documents"
 
@@ -53,7 +54,7 @@ def save_json(filepath, data):
     json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-# دالة فحص الملفات 
+# دالة فحص الملفات
 def get_physical_documents():
   found_files = {}
   search_folders = [DOCS_DIR, "."]
@@ -72,6 +73,177 @@ def get_physical_documents():
                 "folder": folder,
             }
   return found_files
+
+
+# ==============================================================================
+# الأسئلة المتوقعة الذكية (مبنية على تحليل الملفات فعلياً عبر الـ RAG)
+# ==============================================================================
+def get_docs_signature():
+  """بصمة نصية لمجموعة الملفات الحالية، تُستخدم لمعرفة إذا تغيّرت الملفات."""
+  files = get_physical_documents()
+  sig_parts = sorted([f"{name}:{info['size']}" for name, info in files.items()])
+  return "|".join(sig_parts)
+
+
+def _extract_json_object(raw_text):
+  cleaned = raw_text.strip()
+  if cleaned.startswith("```"):
+    cleaned = cleaned.strip("`")
+    if cleaned.lower().startswith("json"):
+      cleaned = cleaned[4:]
+  start = cleaned.find("{")
+  end = cleaned.rfind("}")
+  if start != -1 and end != -1:
+    cleaned = cleaned[start:end + 1]
+  return json.loads(cleaned)
+
+
+def generate_smart_faq(rag, num_categories=5, questions_per_category=4):
+  """يحلل الملفات المفهرسة عبر الـ RAG، يستنتج تصنيفات وأسئلة متوقعة من العملاء
+  لكل تصنيف، ثم يستخرج إجابة فعلية لكل سؤال ويخزن كل شيء (النتيجة جاهزة/محفوظة)."""
+  signature = get_docs_signature()
+  if not signature:
+    return False, "⚠️ لا توجد ملفات مفهرسة بعد لتوليد أسئلة منها.", None
+
+  try:
+    meta_prompt = (
+        "بناءً على كل الوثائق والملفات المتوفرة لديك في قاعدة المعرفة فقط،"
+        f" ولّد {num_categories} تصنيفات (فئات مواضيع) تغطي أهم محتويات هذه"
+        f" الملفات، ولكل تصنيف اكتب {questions_per_category} أسئلة يُتوقع أن"
+        " يطرحها عميل أو موظف حول هذا الموضوع تحديداً. أجب فقط بصيغة JSON"
+        " صحيحة وصارمة بدون أي نص أو شرح أو علامات ``` قبلها أو بعدها، بالشكل"
+        ' التالي بالضبط: {"اسم التصنيف الأول": ["السؤال 1", "السؤال 2"],'
+        ' "اسم التصنيف الثاني": ["السؤال 1", "السؤال 2"]}'
+    )
+    raw = rag.query(meta_prompt)
+    categories_questions = _extract_json_object(raw)
+  except Exception as e:
+    return False, f"❌ تعذر توليد التصنيفات والأسئلة من الملفات: {str(e)}", None
+
+  result = {}
+  for cat, qs in categories_questions.items():
+    qa_list = []
+    for q in qs:
+      try:
+        ans = rag.query(q)
+      except Exception as e:
+        ans = f"⚠️ تعذر استخراج الإجابة تلقائياً: {str(e)}"
+      qa_list.append({"question": q, "answer": ans})
+    result[cat] = qa_list
+
+  cache = {
+      "signature": signature,
+      "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+      "categories": result,
+  }
+  save_json(FAQ_CACHE_FILE, cache)
+  return True, "✅ تم توليد الأسئلة الذكية وإجاباتها بنجاح من الملفات الحالية.", cache
+
+
+def load_smart_faq():
+  return load_json(FAQ_CACHE_FILE, None)
+
+
+def render_smart_faq(rag, allow_generate=False):
+  cache = load_smart_faq()
+  current_sig = get_docs_signature()
+
+  if allow_generate:
+    col_g1, col_g2 = st.columns([3, 1])
+    with col_g1:
+      if cache:
+        st.caption(f"🕒 آخر توليد: {cache.get('generated_at', '-')}")
+        if cache.get("signature") != current_sig:
+          st.warning(
+              "⚠️ الملفات تغيّرت منذ آخر توليد للأسئلة، يُفضل إعادة التوليد"
+              " ليتم تحديث الأسئلة والإجابات."
+          )
+      else:
+        st.info("لم يتم توليد أسئلة ذكية بعد من الملفات.")
+    with col_g2:
+      if st.button("🧠 توليد / تحديث الأسئلة من الملفات"):
+        with st.spinner("جاري تحليل الملفات وتوليد الأسئلة المتوقعة وإجاباتها..."):
+          ok, msg, new_cache = generate_smart_faq(rag)
+        if ok:
+          st.success(msg)
+          st.rerun()
+        else:
+          st.error(msg)
+    st.markdown("---")
+
+  if not cache or not cache.get("categories"):
+    st.info("📭 لا توجد أسئلة ذكية متاحة حالياً.")
+    return
+
+  for cat_name, qa_list in cache["categories"].items():
+    with st.expander(f"📂 {cat_name}", expanded=True):
+      for qa in qa_list:
+        st.markdown(f"**❓ {qa['question']}**")
+        st.info(qa["answer"])
+
+
+# ==============================================================================
+# الشات الذكي المحفوظ (مشترك بين المدير والموظفين، لكل مستخدم جلساته الخاصة)
+# ==============================================================================
+def render_chat_tab(rag, username):
+  if username not in st.session_state.chats_db:
+    st.session_state.chats_db[username] = []
+  my_sessions = st.session_state.chats_db[username]
+
+  if not my_sessions:
+    first_id = f"session_1_{int(datetime.now().timestamp())}"
+    my_sessions.append({"id": first_id, "title": "محادثة عامة", "messages": []})
+    save_json(CHATS_FILE, st.session_state.chats_db)
+
+  col_side, col_chat = st.columns([1, 2])
+
+  with col_side:
+    st.write("#### 📑 سجل جلسات محادثاتك:")
+    if st.button("➕ محادثة جديدة", key=f"newchat_{username}"):
+      new_sess_id = (
+          f"session_{len(my_sessions) + 1}_{int(datetime.now().timestamp())}"
+      )
+      my_sessions.append({
+          "id": new_sess_id,
+          "title": f"محادثة #{len(my_sessions) + 1}",
+          "messages": [],
+      })
+      save_json(CHATS_FILE, st.session_state.chats_db)
+      st.rerun()
+
+    session_dict = {s["id"]: s["title"] for s in my_sessions}
+    selected_session_id = st.radio(
+        "اختر الجلسة:",
+        list(session_dict.keys()),
+        format_func=lambda x: f"🗨️ {session_dict[x]}",
+        key=f"radio_{username}",
+    )
+
+  with col_chat:
+    curr_session = next(s for s in my_sessions if s["id"] == selected_session_id)
+    st.write(f"### 📌 {curr_session['title']}")
+
+    for m in curr_session["messages"]:
+      with st.chat_message(m["role"]):
+        st.write(m["content"])
+
+    prompt = st.chat_input("اكتب سؤالك هنا...", key=f"chatinput_{username}")
+    if prompt:
+      if not curr_session["messages"]:
+        curr_session["title"] = " ".join(prompt.split()[:5])
+
+      curr_session["messages"].append({"role": "user", "content": prompt})
+      with st.chat_message("user"):
+        st.write(prompt)
+
+      with st.chat_message("assistant"):
+        with st.spinner("جاري استخراج الإجابة..."):
+          ans = rag.query(prompt)
+        st.write(ans)
+
+      curr_session["messages"].append({"role": "assistant", "content": ans})
+      save_json(CHATS_FILE, st.session_state.chats_db)
+      st.rerun()
 
 
 def send_employee_email(
@@ -188,72 +360,6 @@ if "real_admin_user" not in st.session_state:
 if "admin_qa_result" not in st.session_state:
   st.session_state.admin_qa_result = None
 
-# ==============================================================================
-# 
-# ==============================================================================
-DOCUMENT_SPECIFIC_QUESTIONS = {
-    "🖥️ تنظيم وتصميم الحاسوب (Chapter 5 - Basic Computer)": [
-        (
-            "ما هو الفرق بين Direct Addressing و Indirect Addressing وكيف يتم"
-            " تمييزهما باستخدام البت I؟"
-        ),
-        (
-            "ما هي وظيفة سجل المجمع (Accumulator - AC) وسجل العداد البرمجي"
-            " (PC) وسجل التعليمات (IR)؟"
-        ),
-        (
-            "ما هو حجم الذاكرة في Basic Computer وكم عدد البتات المخصصة للـ"
-            " Opcode والعنوان؟"
-        ),
-        "ما هو مفهوم Effective Address وكيف يتم حسابه في التعليمات المختلفة؟",
-    ],
-    "⚙️ التحكم البرمجي الدقيق (Chapter 7 - Microprogrammed Control)": [
-        "ما هي وظيفة سجل عنوان التحكم (Control Address Register - CAR)؟",
-        (
-            "ما هو الفرق بين Control Memory والذاكرة الرئيسية العادية من حيث"
-            " الوظيفة والنوع (ROM vs RAM)؟"
-        ),
-        (
-            "كيف تتم عملية الـ Mapping لتحويل Opcode الخاص بالتعليمة إلى عنوان"
-            " بداية الـ Microinstruction في CAR؟"
-        ),
-        (
-            "ما هي الحالات الأربعة لتحديد التعليمة التالية (Next"
-            " Microinstruction)؟"
-        ),
-    ],
-    "💾 تنظيم الذاكرة والشرائح (Chapter 12 - Memory Organization)": [
-        (
-            "كيف يتم حساب عدد شرائح RAM و ROM المطلوبة لبناء سعة ذاكرة محددة"
-            " للنظام؟"
-        ),
-        "ما هي وظيفة خطوط فك التشفير (Decoders) وخط اختيار الشريحة (CS1, CS2)؟",
-        "كيف يتم توزيع خطوط ناقل العناوين (Address Bus) بين RAM و ROM؟",
-        (
-            "ما هو الفرق بين Memory-Mapped I/O و Isolated I/O في تنظيم"
-            " الذاكرة؟"
-        ),
-    ],
-    "🛡️ ثقافة أمن المعلومات والأمن السيبراني": [
-        (
-            "ما هو تشكيل ومهام المجلس الوطني للأمن السيبراني في الأردن وفق"
-            " قانون عام 2019؟"
-        ),
-        (
-            "ما هي أهداف المركز الوطني للأمن السيبراني لحماية البنية التحتية"
-            " الوطنية؟"
-        ),
-        (
-            "ما هو الفرق بين أمن المعلومات (Information Security) والأمن"
-            " السيبراني (Cybersecurity)؟"
-        ),
-        (
-            "ما هي أبرز مخاطر الفضاء السيبراني وتهديدات الحروب الإلكترونية"
-            " الحديثة؟"
-        ),
-    ],
-}
-
 # شاشة تسجيل الدخول
 if st.session_state.logged_user is None:
   st.title("🔐 تسجيل الدخول إلى النظام ")
@@ -329,42 +435,32 @@ if current_user["role"] == "admin":
   st.title("🛡️ لوحة تحكم الإدارة العامة ومتابعة التسجيلات")
 
   (
-      tab_ask,
+      tab_faq,
+      tab_mychat,
       tab_recordings,
       tab_mgmt,
-      tab_chats,
       tab_email,
       tab_docs,
   ) = st.tabs([
-      "💡 الاسئلة المتوقعة ",
+      "💡 الأسئلة الذكية",
+      "💬 شاتي",
       "🎧 سجل المكالمات ",
       "👥 إدارة الموظفين والمهام",
-      "💬 سجل  الموظفين",
       "⚙️ إعدادات البريد الإلكتروني",
       "📁 ملفات الشركة ",
   ])
 
-  # --- تبويب 1: بنك الأسئلة والاستعلام الفوري ---
-  with tab_ask:
-    st.subheader("📑 الاسئلة الكثر شيوعا")
-    st.caption("اضغط على أي سؤال، وسيتم استخراج الإجابة فوراً:")
-
-    for section_name, questions in DOCUMENT_SPECIFIC_QUESTIONS.items():
-      with st.expander(f"📂 {section_name}", expanded=True):
-        col_q1, col_q2 = st.columns(2)
-        for i, q_text in enumerate(questions):
-          target_col = col_q1 if i % 2 == 0 else col_q2
-          with target_col:
-            if st.button(f"❓ {q_text}", key=f"btn_ask_{section_name}_{i}"):
-              with st.spinner("جاري البحث..."):
-                answer = rag.query(q_text)
-                st.session_state.admin_qa_result = {
-                    "question": q_text,
-                    "answer": answer,
-                }
+  # --- تبويب 1: الأسئلة المتوقعة الذكية (مولّدة تلقائياً من الملفات) ---
+  with tab_faq:
+    st.subheader("💡 الأسئلة المتوقعة الذكية (مبنية على تحليل ملفات الشركة)")
+    st.caption(
+        "يتم توليد هذه الأسئلة وإجاباتها تلقائياً من تحليل الملفات المرفوعة،"
+        " وتظهر نفسها للموظفين أيضاً."
+    )
+    render_smart_faq(rag, allow_generate=True)
 
     st.markdown("---")
-    st.subheader("ما استفسارك:")
+    st.subheader("🔍 استعلام مباشر (غير محفوظ في الأسئلة الشائعة)")
     user_custom_q = st.text_input(
         "اكتب السؤال هنا:", placeholder="ب ماذا تفكر  "
     )
@@ -387,7 +483,13 @@ if current_user["role"] == "admin":
         st.session_state.admin_qa_result = None
         st.rerun()
 
-  # --- تبويب 2: سجل المكالمات والتسجيل الحقيقي ---
+  # --- تبويب 2: شات المدير الخاص المحفوظ ---
+  with tab_mychat:
+    st.subheader("💬 شاتي الخاص")
+    st.caption("محادثاتك محفوظة هنا، وتقدر تفتح أكثر من محادثة وترجعلها بأي وقت.")
+    render_chat_tab(rag, current_user["username"])
+
+  # --- تبويب 3: سجل المكالمات والتسجيل الحقيقي ---
   with tab_recordings:
     st.subheader("🎧 سجل المكالمات  ")
     calls = load_json(CALLS_FILE, [])
@@ -429,7 +531,7 @@ if current_user["role"] == "admin":
           st.success("تم الحذف.")
           st.rerun()
 
-  # --- تبويب 3: إدارة الموظفين وتحديث بياناتهم وإرسال الإيميل ---
+  # --- تبويب 4: إدارة الموظفين وتحديث بياناتهم وإرسال الإيميل ---
   with tab_mgmt:
     with st.expander("➕ إضافة موظف جديد إلى النظام", expanded=False):
       with st.form("add_emp_form", clear_on_submit=True):
@@ -567,7 +669,7 @@ if current_user["role"] == "admin":
               st.rerun()
 
           st.markdown("---")
-          
+
           task_c1, task_c2 = st.columns(2)
           with task_c1:
             task_text = st.text_input(
@@ -607,32 +709,6 @@ if current_user["role"] == "admin":
             task_desc = t.get("المهمة", t.get("task", ""))
             task_status = t.get("الحالة", t.get("status", "قيد التنفيذ"))
             st.write(f"- **{task_desc}** | الحالة: `{task_status}`")
-
-  # --- تبويب 4: سجل محادثات الموظفين ---
-  with tab_chats:
-    st.subheader("سجلات ومحادثات الموظفين السابقة")
-    emp_names_map = {
-        e["name"]: e["username"]
-        for e in st.session_state.users_db
-        if e["role"] == "employee"
-    }
-    if emp_names_map:
-      selected_emp_name = st.selectbox(
-          "اختر الموظف لعرض أرشيف محادثاته:", list(emp_names_map.keys())
-      )
-      target_un = emp_names_map[selected_emp_name]
-      emp_chat_sessions = st.session_state.chats_db.get(target_un, [])
-      if not emp_chat_sessions:
-        st.info(f"لا توجد محادثات للموظف {selected_emp_name}.")
-      else:
-        for session in emp_chat_sessions:
-          with st.expander(f"💬 المحادثة: {session['title']}"):
-            for msg in session["messages"]:
-              role_label = (
-                  "الموظف" if msg["role"] == "user" else "الذكاء الاصطناعي"
-              )
-              st.markdown(f"**{role_label}:** {msg['content']}")
-              st.divider()
 
   # --- تبويب 5: إعدادات البريد الإلكتروني (SMTP) ---
   with tab_email:
@@ -734,11 +810,17 @@ if current_user["role"] == "admin":
 # ==============================================================================
 else:
   st.title(f"💼 واجهة عمل الموظف: {current_user['name']}")
-  t1, t2, t3 = st.tabs([
+  t0, t1, t2, t3 = st.tabs([
+      "💡 الأسئلة الشائعة",
       "📞 المكالمات المحولة إليّ ",
       "📌 مهامي وتنبيهات الإدارة",
       "💬 الشات الذكي لك",
   ])
+
+  # --- تبويب 0: الأسئلة الشائعة الذكية (نفس أسئلة المدير، للعرض فقط) ---
+  with t0:
+    st.subheader("💡 الأسئلة الشائعة")
+    render_smart_faq(rag, allow_generate=False)
 
   # --- تبويب 1: مكالمات الموظف ---
   with t1:
@@ -799,92 +881,8 @@ else:
           st.success("تم إرسال تأكيد الإنجاز للمدير!")
           st.rerun()
 
-  # --- تبويب 3: شات الموظف وبنك الأسئلة المتوقعة المتاح للموظفين أيضاً ---
+  # --- تبويب 3: الشات الذكي المحفوظ الخاص بالموظف ---
   with t3:
-    st.subheader(
-        "💬 الشات الذكي للاستعلام "
-    )
-
-    if current_user["username"] not in st.session_state.chats_db:
-      st.session_state.chats_db[current_user["username"]] = []
-    my_sessions = st.session_state.chats_db[current_user["username"]]
-
-    
-    col_side, col_chat = st.columns(2)
-
-    with col_side:
-      st.write("#### 📑 سجل جلسات محادثاتك:")
-      if st.button("➕ محادثة جديدة"):
-        new_sess_id = (
-            f"session_{len(my_sessions) + 1}_{int(datetime.now().timestamp())}"
-        )
-        my_sessions.append({
-            "id": new_sess_id,
-            "title": f"محادثة #{len(my_sessions) + 1}",
-            "messages": [],
-        })
-        save_json(CHATS_FILE, st.session_state.chats_db)
-        st.rerun()
-
-      if not my_sessions:
-        first_id = f"session_1_{int(datetime.now().timestamp())}"
-        my_sessions.append(
-            {"id": first_id, "title": "محادثة عامة", "messages": []}
-        )
-        save_json(CHATS_FILE, st.session_state.chats_db)
-
-      session_dict = {s["id"]: s["title"] for s in my_sessions}
-      selected_session_id = st.radio(
-          "اختر الجلسة:",
-          list(session_dict.keys()),
-          format_func=lambda x: f"🗨️ {session_dict[x]}",
-      )
-
-    with col_chat:
-      curr_session = next(
-          s for s in my_sessions if s["id"] == selected_session_id
-      )
-      st.write(f"### 📌 {curr_session['title']}")
-
-      # بنك الأسئلة المتوقعة المباشرة للموظف بضغطة زر واحدة
-      with st.expander(
-          "💡الاسئلة الشائعة "
-          " :",
-          expanded=False,
-      ):
-        emp_chosen_q = None
-        for cat_name, q_arr in DOCUMENT_SPECIFIC_QUESTIONS.items():
-          st.markdown(f"**{cat_name}**")
-          eq1, eq2 = st.columns(2)
-          for q_idx, q_val in enumerate(q_arr):
-            target_eq = eq1 if q_idx % 2 == 0 else eq2
-            with target_eq:
-              if st.button(f"❓ {q_val}", key=f"emp_btn_q_{cat_name}_{q_idx}"):
-                emp_chosen_q = q_val
-
-      for m in curr_session["messages"]:
-        with st.chat_message(m["role"]):
-          st.write(m["content"])
-
-      emp_prompt = st.chat_input("اطرح أي استفسار حول ملفات ...")
-
-      active_query = emp_chosen_q if emp_chosen_q else emp_prompt
-
-      if active_query:
-        if not curr_session["messages"]:
-          curr_session["title"] = " ".join(active_query.split()[:4])
-
-        curr_session["messages"].append(
-            {"role": "user", "content": active_query}
-        )
-        with st.chat_message("user"):
-          st.write(active_query)
-
-        with st.chat_message("assistant"):
-          with st.spinner("جاري استخراج الشرح ..."):
-            ans = rag.query(active_query)
-          st.write(ans)
-
-        curr_session["messages"].append({"role": "assistant", "content": ans})
-        save_json(CHATS_FILE, st.session_state.chats_db)
-        st.rerun()
+    st.subheader("💬 الشات الذكي للاستعلام")
+    st.caption("محادثاتك محفوظة هنا، وتقدر تفتح أكثر من محادثة وترجعلها بأي وقت.")
+    render_chat_tab(rag, current_user["username"])
