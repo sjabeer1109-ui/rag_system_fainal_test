@@ -340,6 +340,22 @@ def count_unread_private_thread(reader_username, thread_key):
   )
 
 
+def get_thread_key(username_a, username_b):
+  """مفتاح ثابت لمحادثة خاصة بين أي شخصين (موظف-موظف أو موظف-مدير)،
+  بغض النظر عن ترتيب إدخالهم."""
+  return "__".join(sorted([username_a, username_b]))
+
+
+def total_private_unread(reader_username):
+  total = 0
+  for u in st.session_state.users_db:
+    if u["username"] == reader_username:
+      continue
+    tkey = get_thread_key(reader_username, u["username"])
+    total += count_unread_private_thread(reader_username, tkey)
+  return total
+
+
 def find_employee_by_name(name_raw):
   name_raw = name_raw.strip()
   for u in st.session_state.users_db:
@@ -513,21 +529,32 @@ def render_company_chats_tab(current_user):
     render_group_chat(current_user)
 
   with sub_private:
-    if current_user["role"] == "admin":
-      employees = [u for u in st.session_state.users_db if u["role"] == "employee"]
-      if not employees:
-        st.info("لا يوجد موظفون بعد.")
-      else:
-        emp_map = {e["username"]: e["name"] for e in employees}
-        selected_un = st.selectbox(
-            "اختر الموظف للمحادثة الخاصة معه:",
-            list(emp_map.keys()),
-            format_func=lambda x: emp_map[x],
-            key="dm_target_select",
-        )
-        render_private_chat(current_user, selected_un, emp_map[selected_un])
-    else:
-      render_private_chat(current_user, current_user["username"], "الإدارة")
+    # أي شخص بالنظام (مدير أو موظف) يقدر يحكي خاص مع أي شخص ثاني.
+    others = [
+        u for u in st.session_state.users_db
+        if u["username"] != current_user["username"]
+    ]
+    if not others:
+      st.info("لا يوجد أشخاص آخرين للمحادثة معهم بعد.")
+      return
+
+    def _contact_label(u):
+      tkey = get_thread_key(current_user["username"], u["username"])
+      unread = count_unread_private_thread(current_user["username"], tkey)
+      role_tag = " ⭐ (الإدارة)" if u["role"] == "admin" else ""
+      badge = f" 🔴 {unread}" if unread else ""
+      return f"{u['name']}{role_tag}{badge}"
+
+    name_map = {u["username"]: _contact_label(u) for u in others}
+    selected_un = st.selectbox(
+        "اختر الشخص للمحادثة الخاصة معه:",
+        list(name_map.keys()),
+        format_func=lambda x: name_map[x],
+        key=f"dm_target_select_{current_user['username']}",
+    )
+    target_user = next(u for u in others if u["username"] == selected_un)
+    thread_key = get_thread_key(current_user["username"], selected_un)
+    render_private_chat(current_user, thread_key, target_user["name"])
 
 
 # ==============================================================================
@@ -541,7 +568,7 @@ def save_sedra_sessions(data):
   save_json(SEDRA_CHAT_FILE, data)
 
 
-def sedra_handle_command(text, rag):
+def sedra_handle_command(text, rag, admin_user):
   t = text.strip()
 
   m = re.search(
@@ -555,8 +582,8 @@ def sedra_handle_command(text, rag):
       mid = max([mm["id"] for mm in msgs], default=0) + 1
       msgs.append({
           "id": mid,
-          "username": "admin",
-          "name": "المدير العام",
+          "username": admin_user["username"],
+          "name": admin_user["name"],
           "role": "admin",
           "content": content,
           "timestamp": now_ts(),
@@ -573,15 +600,16 @@ def sedra_handle_command(text, rag):
     content = m.group(2).strip()
     if target and content:
       chats = load_private_chats()
-      thread = chats.get(target["username"], [])
+      thread_key = get_thread_key(admin_user["username"], target["username"])
+      thread = chats.get(thread_key, [])
       thread.append({
-          "sender_username": "admin",
-          "sender_name": "المدير العام",
+          "sender_username": admin_user["username"],
+          "sender_name": admin_user["name"],
           "is_admin": True,
           "content": content,
           "timestamp": now_ts(),
       })
-      chats[target["username"]] = thread
+      chats[thread_key] = thread
       save_private_chats(chats)
       return f'✅ تم إرسال رسالة خاصة لـ {target["name"]}: "{content}"'
 
@@ -598,7 +626,7 @@ def sedra_handle_command(text, rag):
   return company_scoped_query(rag, t)
 
 
-def render_sedra_tab(rag):
+def render_sedra_tab(rag, admin_user):
   st.subheader("🎙️ سيدرا — المساعد الصوتي للإدارة")
   st.caption(
       "اضغط على الدائرة وتكلم، وسيدرا بيسمعك ويرد عليك صوتياً، وبيقدر يبعت"
@@ -647,7 +675,7 @@ def render_sedra_tab(rag):
         curr["title"] = " ".join(question.split()[:5])
       curr["messages"].append({"role": "user", "content": question})
       with st.spinner("سيدرا بيفكر..."):
-        answer = sedra_handle_command(question, rag)
+        answer = sedra_handle_command(question, rag, admin_user)
       curr["messages"].append({"role": "assistant", "content": answer})
       save_sedra_sessions(data)
       st.session_state["sedra_last_answer"] = answer
@@ -718,7 +746,7 @@ def render_sedra_tab(rag):
         curr["title"] = " ".join(typed.split()[:5])
       curr["messages"].append({"role": "user", "content": typed})
       with st.spinner("سيدرا بيفكر..."):
-        answer = sedra_handle_command(typed, rag)
+        answer = sedra_handle_command(typed, rag, admin_user)
       curr["messages"].append({"role": "assistant", "content": answer})
       save_sedra_sessions(data)
       st.session_state["sedra_last_answer"] = answer
@@ -948,11 +976,7 @@ if current_user["role"] == "admin":
   check_new_task_completions_for_admin(current_user["username"])
 
   group_unread = count_unread_group(current_user["username"])
-  private_unread_total = sum(
-      count_unread_private_thread(current_user["username"], e["username"])
-      for e in st.session_state.users_db
-      if e["role"] == "employee"
-  )
+  private_unread_total = total_private_unread(current_user["username"])
   chats_badge = group_unread + private_unread_total
   chats_label = "💬 محادثات الشركة" + (f" 🔴{chats_badge}" if chats_badge else "")
 
@@ -997,7 +1021,7 @@ if current_user["role"] == "admin":
 
   # --- تبويب 4: سيدرا (مساعد صوتي للإدارة) ---
   with tab_sedra:
-    render_sedra_tab(rag)
+    render_sedra_tab(rag, current_user)
 
   # --- تبويب 5: سجل المكالمات والتسجيل الحقيقي ---
   with tab_recordings:
@@ -1330,9 +1354,7 @@ else:
   check_new_task_notifications_for_employee(current_user["username"], my_tasks_all)
 
   group_unread = count_unread_group(current_user["username"])
-  private_unread = count_unread_private_thread(
-      current_user["username"], current_user["username"]
-  )
+  private_unread = total_private_unread(current_user["username"])
   chats_badge = group_unread + private_unread
   chats_label = "💬 محادثة الشركة" + (f" 🔴{chats_badge}" if chats_badge else "")
   tasks_label = "📌 مهامي وتنبيهات الإدارة" + (f" 🔴{pending_count}" if pending_count else "")
