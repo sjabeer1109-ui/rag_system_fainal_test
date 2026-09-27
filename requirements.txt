@@ -8,3 +8,4 @@ chromadb
 pypdf
 fastembed
 edge-tts
+openai
