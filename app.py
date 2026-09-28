@@ -1916,4 +1916,4 @@ else:
                     st.rerun()
 
     with t3:
-        render_chat_tab(rag,
+        render_chat_tab(rag,current_user["username"])
