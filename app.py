@@ -428,18 +428,15 @@ def try_create_task_from_message(text, sender_role):
 # دالة عرض وتفاعل الوسائط والتصويت داخل رسائل الشات
 # ==============================================================================
 def render_message_media_and_poll(m, current_user, on_vote_callback):
-    # 1. عرض الرسالة الصوتية
     if m.get("media_type") == "audio" and m.get("media_path"):
         if os.path.exists(m["media_path"]):
             with open(m["media_path"], "rb") as af:
                 st.audio(af.read(), format="audio/wav")
 
-    # 2. عرض الصورة
     elif m.get("media_type") == "image" and m.get("media_path"):
         if os.path.exists(m["media_path"]):
             st.image(m["media_path"], use_container_width=True)
 
-    # 3. عرض الملف
     elif m.get("media_type") == "file" and m.get("media_path"):
         if os.path.exists(m["media_path"]):
             with open(m["media_path"], "rb") as ff:
@@ -450,7 +447,6 @@ def render_message_media_and_poll(m, current_user, on_vote_callback):
                     key=f"dl_file_{m['id']}_{current_user['username']}",
                 )
 
-    # 4. عرض التصويت واستطلاع الرأي (Poll)
     elif m.get("poll"):
         poll = m["poll"]
         st.markdown(f"📊 **استطلاع رأي:** {poll['question']}")
@@ -492,7 +488,6 @@ def render_chat_media_toolbar(current_user, on_send_callback, context_key="grp")
             "📊 استطلاع رأي (Poll)",
         ])
 
-        # 1. تسجيل صوتي
         with t_audio:
             st.caption("تحدث وسجل رسالة صوتية (بصمة صوت) مثل الواتساب:")
             if hasattr(st, "audio_input"):
@@ -522,7 +517,6 @@ def render_chat_media_toolbar(current_user, on_send_callback, context_key="grp")
                         )
                         st.rerun()
 
-        # 2. إرسال صورة
         with t_img:
             img_file = st.file_uploader(
                 "اختر صورة:", type=["png", "jpg", "jpeg", "webp"], key=f"img_uploader_{context_key}"
@@ -539,7 +533,6 @@ def render_chat_media_toolbar(current_user, on_send_callback, context_key="grp")
                     )
                     st.rerun()
 
-        # 3. إرسال ملف
         with t_file:
             doc_file = st.file_uploader(
                 "اختر ملفاً أو مستنداً:", type=["pdf", "docx", "txt", "xlsx", "zip"], key=f"doc_uploader_{context_key}"
@@ -556,7 +549,6 @@ def render_chat_media_toolbar(current_user, on_send_callback, context_key="grp")
                     )
                     st.rerun()
 
-        # 4. استطلاع رأي (Poll)
         with t_poll:
             st.caption("أنشئ تصويتاً سريعاً وشاركه في المحادثة:")
             poll_q = st.text_input("سؤال التصويت:", key=f"poll_q_{context_key}")
@@ -634,7 +626,6 @@ def render_group_chat(current_user):
                 if m.get("content"):
                     st.write(m["content"])
 
-                # عرض الوسائط أو التصويت
                 render_message_media_and_poll(
                     m, current_user, on_vote_callback=lambda: save_group_chat(msgs)
                 )
@@ -651,7 +642,6 @@ def render_group_chat(current_user):
 
     can_send = is_admin or state.get("open", True)
     if can_send:
-        # شريط أدوات الوسائط
         def _send_group_entry(content="", media_type=None, media_path=None, media_name=None, poll=None):
             msg_id = max([m["id"] for m in msgs], default=0) + 1
             entry = {
@@ -1660,7 +1650,7 @@ if current_user["role"] == "admin":
                             st.rerun()
 
                     st.markdown("---")
-                    task_c1, task_c2 = st.columns(2)
+                    task_c1, task_c2 = st.columns()
                     with task_c1:
                         task_text = st.text_input(
                             "إسناد مهمة جديدة:", key=f"task_in_{emp_id}"
