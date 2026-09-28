@@ -580,12 +580,14 @@ def render_company_chats_tab(current_user):
 # محرك صوت سيدرا المزدوج
 # ==============================================================================
 def get_openai_client():
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        settings = load_json(SETTINGS_FILE, {})
-        api_key = settings.get("openai_api_key")
-    if api_key and api_key.strip().startswith("sk-"):
-        return OpenAI(api_key=api_key.strip())
+    settings = load_json(SETTINGS_FILE, {})
+    api_key = os.environ.get("OPENAI_API_KEY") or settings.get("openai_api_key", "")
+    base_url = os.environ.get("OPENAI_BASE_URL") or settings.get("api_address") or None
+    if api_key and api_key.strip():
+        try:
+            return OpenAI(api_key=api_key.strip(), base_url=base_url if base_url else None)
+        except Exception:
+            return None
     return None
 
 
@@ -743,31 +745,11 @@ def sedra_handle_command(text, rag, admin_user):
 def render_sedra_tab(rag, admin_user):
     st.subheader("🎙️ سيدرا — المساعد الصوتي والوكيل التنفيذي ")
 
-    settings = load_json(SETTINGS_FILE, {})
-    current_key = os.environ.get("OPENAI_API_KEY") or settings.get(
-        "openai_api_key", ""
-    )
-
     col_s1, col_s2 = st.columns([2, 1])
     with col_s1:
-        with st.expander(
-            "🔑 ضبط مفتاح OpenAI API", expanded=not bool(current_key)
-        ):
-            new_key = st.text_input(
-                "أدخل مفتاح  API Key الخاص بك:",
-                value=current_key,
-                type="password",
-                help="إذا كان المفتاح بدون رصيد، سيعمل الصوت الاحتياطي المجاني تلقائياً دون انقطاع.",
-            )
-            if st.button("💾 حفظ المفتاح"):
-                settings["openai_api_key"] = new_key.strip()
-                save_json(SETTINGS_FILE, settings)
-                os.environ["OPENAI_API_KEY"] = new_key.strip()
-                st.success("✅ تم الحفظ بنجاح!")
-                st.rerun()
+        st.info("💡 يمكنك ضبط وتعديل مفاتيح الـ API وعناوين السيرفرات بالكامل من تبويبة **'🔑 الـ API address للموقع'** في الأعلى.")
 
     with col_s2:
-        st.write("")
         if st.button("🔊 تجربة صوت سيدرا الآن", use_container_width=True):
             test_audio = generate_speech_audio(
                 "أهلاً بك! صوت سيدرا يعمل بنجاح وجاهزة لتلقي أوامرك صوتياً."
@@ -1152,6 +1134,15 @@ st.session_state.email_config = load_json(
     },
 )
 
+# مزامنة مفاتيح وعناوين الـ API مع البيئة البرمجية من settings.json
+initial_settings = load_json(SETTINGS_FILE, {})
+if initial_settings.get("openai_api_key"):
+    os.environ["OPENAI_API_KEY"] = initial_settings["openai_api_key"]
+if initial_settings.get("gemini_api_key"):
+    os.environ["GEMINI_API_KEY"] = initial_settings["gemini_api_key"]
+if initial_settings.get("api_address"):
+    os.environ["OPENAI_BASE_URL"] = initial_settings["api_address"]
+
 if "logged_user" not in st.session_state:
     st.session_state.logged_user = None
 
@@ -1224,6 +1215,7 @@ with st.sidebar:
     if st.button("🚪 تسجيل الخروج"):
         st.session_state.logged_user = None
         st.session_state.real_admin_user = None
+        st.session_state["api_tab_unlocked"] = False
         st.rerun()
 
 # ==============================================================================
@@ -1250,6 +1242,7 @@ if current_user["role"] == "admin":
         tab_mgmt,
         tab_email,
         tab_docs,
+        tab_api,
     ) = st.tabs([
         "💡 الأسئلة المتكرر",
         "💬 اسئلتي",
@@ -1259,6 +1252,7 @@ if current_user["role"] == "admin":
         "👥 إدارة الموظفين والمهام",
         "⚙️ إعدادات البريد الإلكتروني",
         "📁 ملفات الشركة ",
+        "🔑 الـ API address للموقع",
     ])
 
     with tab_faq:
@@ -1512,6 +1506,106 @@ if current_user["role"] == "admin":
                             st.error(f"تعذر حذف الملف: {str(e)}")
         else:
             st.info("لا توجد ملفات.")
+
+    # ==========================================================================
+    # تبويبة الـ API address للموقع (محمية برمز الأدمن المتزامن)
+    # ==========================================================================
+    with tab_api:
+        st.subheader("🔑 إعدادات الـ API address وعناوين الذكاء الاصطناعي")
+
+        # جلب أحدث بيانات الأدمن من ملف المستخدمين لضمان تطابق الرمز دائماً
+        all_users = load_json(USERS_FILE, default_users)
+        admin_obj = next((u for u in all_users if u["role"] == "admin"), None)
+        admin_real_pin = str(admin_obj["pin"]).strip() if admin_obj else "0000"
+
+        if "api_tab_unlocked" not in st.session_state:
+            st.session_state["api_tab_unlocked"] = False
+
+        if not st.session_state["api_tab_unlocked"]:
+            st.warning("🔒 هذه الصفحة محمية برمز الأمان الخاص بالمدير العام. أدخل رمز الأدمن لفتح الإعدادات.")
+            with st.form("api_unlock_form"):
+                entered_pin = st.text_input("رمز الأدمن (PIN):", type="password")
+                if st.form_submit_button("🔓 تأكيد الدخول إلى إعدادات الـ API"):
+                    if entered_pin.strip() == admin_real_pin:
+                        st.session_state["api_tab_unlocked"] = True
+                        st.success("✅ تم التحقق بنجاح!")
+                        st.rerun()
+                    else:
+                        st.error("❌ رمز الدخول غير صحيح! تأكد من إدخال نفس رمز تسجيل الدخول للأدمن.")
+        else:
+            col_header1, col_header2 = st.columns([3, 1])
+            with col_header1:
+                st.caption("✅ تم التحقق من هويتك كمدير. يمكنك الآن ضبط كل ما يخص الـ APIs وعناوين السيرفرات في صفحة واحدة.")
+            with col_header2:
+                if st.button("🔒 قفل التبويبة", key="lock_api_tab"):
+                    st.session_state["api_tab_unlocked"] = False
+                    st.rerun()
+
+            current_settings = load_json(SETTINGS_FILE, {})
+
+            with st.form("api_settings_full_form"):
+                st.markdown("#### 🌐 عناوين السيرفر ومفاتيح الذكاء الاصطناعي")
+                api_addr = st.text_input(
+                    "الـ API address للموقع (Endpoint / Base URL):",
+                    value=current_settings.get("api_address", "[https://api.openai.com/v1](https://api.openai.com/v1)"),
+                    help="مثل [https://api.openai.com/v1](https://api.openai.com/v1) أو عنوان السيرفر المحلي الخاص بك مثل http://localhost:11434/v1",
+                )
+
+                col_k1, col_k2 = st.columns(2)
+                with col_k1:
+                    openai_k = st.text_input(
+                        "مفتاح OpenAI API Key:",
+                        value=current_settings.get("openai_api_key", ""),
+                        type="password",
+                        help="مفتاح الـ API الخاص بـ OpenAI",
+                    )
+                with col_k2:
+                    gemini_k = st.text_input(
+                        "مفتاح Google Gemini API Key:",
+                        value=current_settings.get("gemini_api_key", ""),
+                        type="password",
+                        help="مفتاح الـ API الخاص بـ Gemini للموقع والـ RAG",
+                    )
+
+                model_name = st.text_input(
+                    "اسم النموذج المفضل (Model Name):",
+                    value=current_settings.get("model_name", "gpt-4o-mini"),
+                    help="مثال: gpt-4o-mini أو gemini-1.5-flash أو llama3",
+                )
+
+                st.markdown("---")
+                st.markdown("#### 🔐 رمز الأدمن المشترك (PIN)")
+                st.caption("تغييرك لهذا الرمز هنا يغير تلقائياً رمز تسجيل دخول الأدمن ورمز الدخول لهذه التبويبة.")
+                new_admin_pin = st.text_input(
+                    "رمز الدخول الخاص بالأدمن (PIN):",
+                    value=admin_real_pin,
+                    type="password",
+                )
+
+                if st.form_submit_button("💾 حفظ كافة إعدادات الـ API وتحديث الرمز فوراً"):
+                    # 1. حفظ إعدادات الـ APIs
+                    current_settings["api_address"] = api_addr.strip()
+                    current_settings["openai_api_key"] = openai_k.strip()
+                    current_settings["gemini_api_key"] = gemini_k.strip()
+                    current_settings["model_name"] = model_name.strip()
+                    save_json(SETTINGS_FILE, current_settings)
+
+                    # تفعيل في بيئة النظام
+                    if openai_k.strip():
+                        os.environ["OPENAI_API_KEY"] = openai_k.strip()
+                    if gemini_k.strip():
+                        os.environ["GEMINI_API_KEY"] = gemini_k.strip()
+                    if api_addr.strip():
+                        os.environ["OPENAI_BASE_URL"] = api_addr.strip()
+
+                    # 2. مزامنة وتحديث رمز الأدمن إذا تم تعديله
+                    if new_admin_pin.strip() and admin_obj:
+                        admin_obj["pin"] = new_admin_pin.strip()
+                        save_json(USERS_FILE, all_users)
+                        st.session_state.users_db = all_users
+
+                    st.success("✅ تم حفظ كافة إعدادات الـ API وعنوان السيرفر وتحديث رمز الأدمن بنجاح!")
+                    st.rerun()
 
 # ==============================================================================
 #                      2. واجهة الموظف (EMPLOYEE DASHBOARD)
