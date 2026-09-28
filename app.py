@@ -1650,7 +1650,7 @@ if current_user["role"] == "admin":
                             st.rerun()
 
                     st.markdown("---")
-                    task_c1, task_c2 = st.columns()
+                    task_c1, task_c2 = st.columns(2)
                     with task_c1:
                         task_text = st.text_input(
                             "إسناد مهمة جديدة:", key=f"task_in_{emp_id}"
