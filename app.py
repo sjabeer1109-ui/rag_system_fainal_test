@@ -165,7 +165,7 @@ def generate_smart_faq(rag, num_categories=5, questions_per_category=4):
       "categories": result,
   }
   save_json(FAQ_CACHE_FILE, cache)
-  return True, "✅ تم توليد الأسئلة الذكية بنجاح من الملفات.", cache
+  return True, "✅ الاسئلة المتكررة .", cache
 
 
 def load_smart_faq():
@@ -186,7 +186,7 @@ def render_smart_faq(rag, allow_generate=False):
       else:
         st.info("لم يتم توليد أسئلة ذكية بعد من الملفات.")
     with col_g2:
-      if st.button("🧠 توليد / تحديث الأسئلة من الملفات"):
+      if st.button("🧠الاسئلة المتكررة حسب تحليل العملاء ."):
         with st.spinner("جاري تحليل الملفات وتوليد الأسئلة..."):
           ok, msg, new_cache = generate_smart_faq(rag)
         if ok:
@@ -197,7 +197,7 @@ def render_smart_faq(rag, allow_generate=False):
     st.markdown("---")
 
   if not cache or not cache.get("categories"):
-    st.info("📭 لا توجد أسئلة ذكية متاحة حالياً.")
+    st.info("📭 لا توجد أسئلة مكررة متاحة حالياً.")
     return
 
   for cat_name, qa_list in cache["categories"].items():
@@ -217,13 +217,13 @@ def render_chat_tab(rag, username):
 
   if not my_sessions:
     first_id = f"session_1_{int(datetime.now().timestamp())}"
-    my_sessions.append({"id": first_id, "title": "محادثة عامة", "messages": []})
+    my_sessions.append({"id": first_id, "title": "اسئلني", "messages": []})
     save_json(CHATS_FILE, st.session_state.chats_db)
 
   col_side, col_chat = st.columns([1, 2])
 
   with col_side:
-    st.write("#### 📑 سجل جلسات محادثاتك:")
+    st.write("#### 📑 سجل اسئلتي :")
     if st.button("➕ محادثة جديدة", key=f"newchat_{username}"):
       new_sess_id = (
           f"session_{len(my_sessions) + 1}_{int(datetime.now().timestamp())}"
@@ -238,7 +238,7 @@ def render_chat_tab(rag, username):
 
     session_dict = {s["id"]: s["title"] for s in my_sessions}
     selected_session_id = st.radio(
-        "اختر الجلسة:",
+        "",
         list(session_dict.keys()),
         format_func=lambda x: f"🗨️ {session_dict[x]}",
         key=f"radio_{username}",
@@ -402,7 +402,7 @@ def render_group_chat(current_user):
   if is_admin:
     col1, col2 = st.columns([3, 1])
     with col1:
-      st.caption("القروب العام لجميع الموظفين والإدارة")
+      st.caption("القروب العام ")
     with col2:
       is_open = state.get("open", True)
       label = "🔒 إغلاق المحادثة" if is_open else "🔓 فتح المحادثة"
@@ -725,7 +725,7 @@ def sedra_handle_command(text, rag, admin_user):
 
 
 def render_sedra_tab(rag, admin_user):
-  st.subheader("🎙️ سيدرا — المساعد الصوتي والوكيل التنفيذي (ChatGPT Voice)")
+  st.subheader("🎙️ سيدرا — المساعد الصوتي والوكيل التنفيذي ")
 
   # لوحة إعدادات مفتاح OpenAI مع زر تجربة الصوت الفوري
   settings = load_json(SETTINGS_FILE, {})
@@ -739,7 +739,7 @@ def render_sedra_tab(rag, admin_user):
         "🔑 ضبط مفتاح OpenAI API", expanded=not bool(current_key)
     ):
       new_key = st.text_input(
-          "أدخل مفتاح OpenAI API Key الخاص بك:",
+          "أدخل مفتاح  API Key الخاص بك:",
           value=current_key,
           type="password",
           help="إذا كان المفتاح بدون رصيد، سيعمل الصوت الاحتياطي المجاني تلقائياً دون انقطاع.",
@@ -755,7 +755,7 @@ def render_sedra_tab(rag, admin_user):
     st.write("")
     if st.button("🔊 تجربة صوت سيدرا الآن", use_container_width=True):
       test_audio = generate_speech_audio(
-          "أهلاً بك يا فندم! صوت سيدرا يعمل بنجاح وجاهزة لتلقي أوامرك صوتياً."
+          "أهلاً بك! صوت سيدرا يعمل بنجاح وجاهزة لتلقي أوامرك صوتياً."
       )
       if test_audio:
         st.session_state["sedra_audio_play"] = test_audio
@@ -766,7 +766,7 @@ def render_sedra_tab(rag, admin_user):
     st.warning(
         "⚠️ تنبيه بخصوص مفتاح OpenAI: "
         + st.session_state["openai_voice_error"]
-        + " (تم تشغيل الصوت العصبي البديل لضمان الرد الصوتي تلقائياً)."
+        + " (تم تشغيل الصوت البديل لضمان الرد الصوتي تلقائياً)."
     )
     del st.session_state["openai_voice_error"]
 
@@ -779,7 +779,7 @@ def render_sedra_tab(rag, admin_user):
         "messages": [{
             "role": "assistant",
             "content": (
-                f"أهلاً بك يا فندم! أنا سيدرا. اضغط على الدائرة وتكلم معي"
+                f"أهلاً بك! أنا سيدرا. اضغط على الدائرة وتكلم معي"
                 " وسأجيبك بالصوت وأدير شؤون الشركة."
             ),
         }],
@@ -798,7 +798,7 @@ def render_sedra_tab(rag, admin_user):
           "messages": [{
               "role": "assistant",
               "content": (
-                  "بدأت محادثة جديدة يا فندم، أنا جاهزة للاستماع الصوتي."
+                  "بدأت محادثة جديدة ، أنا جاهزة للاستماع ."
               ),
           }],
       }
@@ -847,7 +847,7 @@ def render_sedra_tab(rag, admin_user):
 
       curr["messages"].append({"role": "user", "content": question})
 
-      with st.spinner("سيدرا تراجع ملفات الشركة وتجهز الرد الصوتي..."):
+      with st.spinner("سيدرا تراجع ملفات الشركة وتجهز الرد..."):
         answer = sedra_handle_command(question, rag, admin_user)
 
       curr["messages"].append({"role": "assistant", "content": answer})
@@ -1172,7 +1172,7 @@ if st.session_state.logged_user is None:
           st.rerun()
         else:
           st.error("بيانات الدخول غير صحيحة.")
-    st.info("💡 ادخل بحسابك المسجل في النظام.")
+    st.info("💡 ادخل بحسابك .")
   st.stop()
 
 current_user = next(
@@ -1198,7 +1198,7 @@ with st.sidebar:
 
   elif current_user["role"] == "admin":
     st.markdown("---")
-    st.subheader("⚡ الدخول السريع لحساب الموظف:")
+    st.subheader("⚡ الدخول لحساب الموظف:")
     emp_list = [u for u in st.session_state.users_db if u["role"] == "employee"]
     for emp in emp_list:
       if st.button(
@@ -1217,14 +1217,14 @@ with st.sidebar:
 #                      1. واجهة المدير (ADMIN DASHBOARD)
 # ==============================================================================
 if current_user["role"] == "admin":
-  st.title("🛡️ لوحة تحكم الإدارة العامة ومتابعة التسجيلات")
+  st.title("🛡️ لوحة تحكم الإدارة العامة و المتابعة  ")
 
   check_new_task_completions_for_admin(current_user["username"])
 
   group_unread = count_unread_group(current_user["username"])
   private_unread_total = total_private_unread(current_user["username"])
   chats_badge = group_unread + private_unread_total
-  chats_label = "💬 محادثات الشركة" + (
+  chats_label = "💬 تواصل مع الموظفين " + (
       f" 🔴{chats_badge}" if chats_badge else ""
   )
 
@@ -1238,8 +1238,8 @@ if current_user["role"] == "admin":
       tab_email,
       tab_docs,
   ) = st.tabs([
-      "💡 الأسئلة الذكية",
-      "💬 شاتي",
+      "💡 الأسئلة المتكرر",
+      "💬 اسئلتي",
       chats_label,
       "🎙️ سيدرا",
       "🎧 سجل المكالمات ",
@@ -1303,7 +1303,7 @@ if current_user["role"] == "admin":
         with col_a2:
           new_job = st.selectbox(
               "المسمى الوظيفي:",
-              ["دعم فني", "خدمة عملاء", "مبيعات", "إدارة"],
+              [ "دعم فني", "خدمة عملاء", "مبيعات", "إدارة"],
           )
           new_email = st.text_input("البريد الإلكتروني للموظف:")
           send_welcome_mail = st.checkbox(
@@ -1461,17 +1461,17 @@ if current_user["role"] == "admin":
   with tab_docs:
     st.subheader("📁 ملفات الشركة")
     uploaded_files = st.file_uploader(
-        "رفع ملفات جديدة:", type=["pdf", "txt"], accept_multiple_files=True
+        "رفع ملفات جديدة:", type=["اختر ملفاتك "], accept_multiple_files=True
     )
     if uploaded_files:
-      if st.button("🚀 بدء الحفظ وتحديث الفهرس"):
-        with st.spinner("جاري حفظ الملفات وتحديث الفهرس..."):
+      if st.button("🚀 بدء الحفظ وتحديث "):
+        with st.spinner("جاري حفظ الملفات وتحديث..."):
           for uf in uploaded_files:
             target_path = os.path.join(DOCS_DIR, uf.name)
             with open(target_path, "wb") as f_out:
               f_out.write(uf.read())
           sync_res = rag.sync_documents()
-          st.success("تم الحفظ وتحديث الفهرس!")
+          st.success("تم الحفظ وتحديث !")
 
     physical_files = get_physical_documents()
     if physical_files:
@@ -1499,10 +1499,10 @@ else:
   group_unread = count_unread_group(current_user["username"])
   private_unread = total_private_unread(current_user["username"])
   chats_badge = group_unread + private_unread
-  chats_label = "💬 محادثة الشركة" + (
+  chats_label = "💬 قروب الشركة" + (
       f" 🔴{chats_badge}" if chats_badge else ""
   )
-  tasks_label = "📌 مهامي وتنبيهات الإدارة" + (
+  tasks_label = "📌 مهامي وتنبيهات " + (
       f" 🔴{pending_count}" if pending_count else ""
   )
 
