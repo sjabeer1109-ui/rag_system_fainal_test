@@ -590,7 +590,7 @@ def render_group_chat(current_user):
     is_admin = current_user["role"] == "admin"
 
     if is_admin:
-        col1, col2 = st.columns()
+        col1, col2 = st.columns(2)
         with col1:
             st.caption("القروب العام ")
         with col2:
