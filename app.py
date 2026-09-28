@@ -1718,7 +1718,7 @@ if current_user["role"] == "admin":
         physical_files = get_physical_documents()
         if physical_files:
             for fname, finfo in list(physical_files.items()):
-                col_f1, col_f2 = st.columns()
+                col_f1, col_f2 = st.columns(2)
                 with col_f1:
                     st.write(f"- 📄 **{fname}** ({finfo['size']}) `[{finfo['folder']}]`")
                 with col_f2:
@@ -1760,7 +1760,7 @@ if current_user["role"] == "admin":
                     else:
                         st.error("❌ رمز الدخول غير صحيح! تأكد من إدخال نفس رمز تسجيل الدخول للأدمن.")
         else:
-            col_header1, col_header2 = st.columns()
+            col_header1, col_header2 = st.columns(2)
             with col_header1:
                 st.caption("✅ تم التحقق من هويتك كمدير. يمكنك الآن ضبط كل ما يخص الـ APIs وعناوين السيرفرات في صفحة واحدة.")
             with col_header2:
