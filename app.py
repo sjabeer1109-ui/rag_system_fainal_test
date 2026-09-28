@@ -198,7 +198,7 @@ def render_smart_faq(rag, allow_generate=False):
     current_sig = get_docs_signature()
 
     if allow_generate:
-        col_g1, col_g2 = st.columns()
+        col_g1, col_g2 = st.columns(2)
         with col_g1:
             if cache:
                 st.caption(f"🕒 آخر توليد: {cache.get('generated_at', '-')}")
@@ -243,7 +243,7 @@ def render_chat_tab(rag, username):
         chats_db[username] = my_sessions
         save_json(CHATS_FILE, chats_db)
 
-    col_side, col_chat = st.columns()
+    col_side, col_chat = st.columns(2)
 
     with col_side:
         st.write("#### 📑 سجل اسئلتي :")
@@ -973,7 +973,7 @@ def sedra_handle_command(text, rag, admin_user):
 def render_sedra_tab(rag, admin_user):
     st.subheader("🎙️ سيدرا — المساعد الصوتي والوكيل التنفيذي ")
 
-    col_s1, col_s2 = st.columns()
+    col_s1, col_s2 = st.columns(2)
     with col_s1:
         st.info("💡 يمكنك ضبط وتعديل مفاتيح الـ API وعناوين السيرفرات بالكامل من تبويبة **'🔑 الـ API address للموقع'** في الأعلى.")
 
@@ -1011,7 +1011,7 @@ def render_sedra_tab(rag, admin_user):
         data["sessions"] = sessions
         save_sedra_sessions(data)
 
-    col_side, col_main = st.columns()
+    col_side, col_main = st.columns(2)
 
     with col_side:
         st.write("#### 📑 سجل المحادثات:")
