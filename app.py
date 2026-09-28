@@ -244,7 +244,6 @@ def render_chat_tab(rag, username):
         save_json(CHATS_FILE, chats_db)
 
     col_side, col_chat = st.columns(2)
-
     with col_side:
         st.write("#### 📑 سجل اسئلتي :")
         if st.button("➕ محادثة جديدة", key=f"newchat_{username}"):
@@ -457,7 +456,7 @@ def render_message_media_and_poll(m, current_user, on_vote_callback):
             pct = (v_count / total_votes * 100) if total_votes > 0 else 0
             user_voted = current_user["username"] in voters
 
-            col_p1, col_p2 = st.columns()
+            col_p1, col_p2 = st.columns(2)
             with col_p1:
                 prefix = "✅ " if user_voted else "▫️ "
                 st.write(f"{prefix}**{opt_text}** ({v_count} صوت - {pct:.0f}%)")
@@ -1012,7 +1011,6 @@ def render_sedra_tab(rag, admin_user):
         save_sedra_sessions(data)
 
     col_side, col_main = st.columns(2)
-
     with col_side:
         st.write("#### 📑 سجل المحادثات:")
         if st.button("➕ محادثة جديدة", key="sedra_new", use_container_width=True):
