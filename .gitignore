@@ -1,4 +1,21 @@
-.venv/
-__pycache__/
-*.pyc
+# إخفاء المفاتيح والبيئة
 .env
+.venv/
+venv/
+__pycache__/
+
+# إخفاء ملفات البيانات والمكالمات الحساسة
+calls.json
+chats.json
+tasks.json
+users.json
+settings.json
+email_config.json
+processed_files.json
+
+# إخفاء الملفات الكبيرة والتسجيلات
+recordings/
+*.webm
+company_docs/
+documents/
+extracted_images/
