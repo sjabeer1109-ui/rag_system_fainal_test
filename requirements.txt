@@ -9,3 +9,4 @@ pypdf
 fastembed
 edge-tts
 openai
+supabase
