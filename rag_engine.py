@@ -4,42 +4,43 @@ import os
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_groq import ChatGroq
 
-api_key = os.getenv("GROQ_API_KEY")
+# قراءة مفتاح Groq بأمان من إعدادات البيئة و Streamlit Secrets
+MY_GROQ_KEY = os.getenv("GROQ_API_KEY")
 
 
 class EnterpriseRAG:
 
-  def __init__(self, docs_dir="company_docs", persist_dir="chroma_db"):
-    self.docs_dir = docs_dir if os.path.exists(docs_dir) else "."
-    self.persist_dir = persist_dir
-    self.api_key = MY_GROQ_KEY
-    self.processed_hashes = {"system": "ready"}
+    def __init__(self, docs_dir="company_docs", persist_dir="chroma_db"):
+        self.docs_dir = docs_dir if os.path.exists(docs_dir) else "."
+        self.persist_dir = persist_dir
+        self.api_key = MY_GROQ_KEY or os.getenv("GROQ_API_KEY")
+        self.processed_hashes = {"system": "ready"}
 
-  def sync_documents(self):
-    return True, "النظام جاهز ومفهرس."
+    def sync_documents(self):
+        return True, "النظام جاهز ومفهرس."
 
-  def query(self, question: str) -> str:
-    context = ""
-    try:
-      from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-      from langchain_community.vectorstores import Chroma
+    def query(self, question: str) -> str:
+        context = ""
+        try:
+            from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+            from langchain_community.vectorstores import Chroma
 
-      embeddings = FastEmbedEmbeddings(
-          model_name="sentence-transformers/all-MiniLM-L6-v2"
-      )
-      v_db = Chroma(
-          persist_directory=self.persist_dir, embedding_function=embeddings
-      )
-      docs = v_db.similarity_search(question, k=4)
-      if docs:
-        context = "\n\n".join([d.page_content for d in docs])
-    except Exception as e:
-      print(f"Search warning: {e}")
+            embeddings = FastEmbedEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2"
+            )
+            v_db = Chroma(
+                persist_directory=self.persist_dir, embedding_function=embeddings
+            )
+            docs = v_db.similarity_search(question, k=4)
+            if docs:
+                context = "\n\n".join([d.page_content for d in docs])
+        except Exception as e:
+            print(f"Search warning: {e}")
 
-    if not context:
-      context = "محتوى مقررات ووثائق النظام: تنظيم وتصميم الحاسوب (Decoders, Memory, CS1, CS2, CAR, PC, AC)، المعمارية، والذاكرة، والأمن السيبراني."
+        if not context:
+            context = "محتوى مقررات ووثائق النظام: تنظيم وتصميم الحاسوب (Decoders, Memory, CS1, CS2, CAR, PC, AC)، المعمارية، والذاكرة، والأمن السيبراني."
 
-    prompt = f"""أنت أستاذ ومساعد علمي متخصص في شرح مقررات تنظيم وتصميم الحاسوب.
+        prompt = f"""أنت أستاذ ومساعد علمي متخصص في شرح مقررات تنظيم وتصميم الحاسوب.
 أجب عن السؤال التالي بشكل علمي دقيق، مفصل، ومباشر:
 - ابدأ بالحل والشرح المباشر فوراً دون ذكر السؤال.
 - لا تعتذر ولا تقل لا أعلم.
@@ -50,23 +51,25 @@ class EnterpriseRAG:
 السؤال المطلوب حله: {question}
 الشرح العلمي المباشر:"""
 
-    # قائمة النماذج النشطة في الخطة المجانية بالترتيب
-    supported_models = [
-        "openai/gpt-oss-120b",
-        "openai/gpt-oss-20b",
-        "qwen/qwen3.8-27b",
-    ]
+        # قائمة النماذج المعتمدة والسريعة في Groq
+        supported_models = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.8-27b",
+        ]
 
-    last_error = ""
-    for model_name in supported_models:
-      try:
-        llm = ChatGroq(
-            model=model_name, temperature=0.0, api_key=self.api_key
-        )
-        res = llm.invoke(prompt)
-        return res.content.strip()
-      except Exception as err:
-        last_error = str(err)
-        continue
+        last_error = ""
+        for model_name in supported_models:
+            try:
+                llm = ChatGroq(
+                    model=model_name, temperature=0.0, api_key=self.api_key
+                )
+                res = llm.invoke(prompt)
+                return res.content.strip()
+            except Exception as err:
+                last_error = str(err)
+                continue
 
-    return f"❌ خطأ من سيرفر الذكاء الاصطناعي: {last_error}"
+        return f"❌ خطأ من سيرفر الذكاء الاصطناعي: {last_error}"
