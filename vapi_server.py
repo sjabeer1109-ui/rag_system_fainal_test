@@ -5,7 +5,8 @@ from flask import Flask, Response, jsonify, request
 
 app = Flask(__name__)
 
-MY_GROQ_KEY = "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"
+
+MY_GROQ_KEY = os.getenv("GROQ_API_KEY")
 CHROMA_DIR = "chroma_db"
 
 
