@@ -1305,11 +1305,13 @@ def send_employee_email(
         return False, f"❌ فشل إرسال البريد: {str(e)}"
 
 
+
+# قراءة الرموز السرية بأمان من إعدادات الموقع
 default_users = [
     {
         "id": 1,
         "username": "admin",
-        "pin": "0000",
+        "pin": str(os.getenv("ADMIN_PIN", "9482")),
         "name": "المدير العام",
         "role": "admin",
         "job_title": "مدير النظام",
@@ -1318,7 +1320,7 @@ default_users = [
     {
         "id": 2,
         "username": "ahmad",
-        "pin": "1234",
+        "pin": str(os.getenv("AHMAD_PIN", "3821")),
         "name": "أحمد علي",
         "role": "employee",
         "job_title": "دعم فني",
@@ -1327,7 +1329,7 @@ default_users = [
     {
         "id": 3,
         "username": "sara",
-        "pin": "5678",
+        "pin": str(os.getenv("SARA_PIN", "4729")),
         "name": "سارة محمود",
         "role": "employee",
         "job_title": "خدمة عملاء",
