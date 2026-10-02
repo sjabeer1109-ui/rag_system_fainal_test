@@ -1,4 +1,6 @@
 import asyncio
+import hashlib
+import hmac
 import base64
 import concurrent.futures
 from datetime import datetime, timezone, timedelta
@@ -50,6 +52,7 @@ PRIVATE_CHATS_FILE = "private_chats.json"
 LAST_READ_FILE = "last_read.json"
 SEDRA_CHAT_FILE = "sedra_chat.json"
 SETTINGS_FILE = "settings.json"
+AUDIT_LOG_FILE = "audit_log.json"
 RECORDINGS_DIR = "recordings"
 DOCS_DIR = "documents"
 CHAT_MEDIA_DIR = "chat_media"
@@ -59,7 +62,9 @@ os.makedirs(DOCS_DIR, exist_ok=True)
 os.makedirs(CHAT_MEDIA_DIR, exist_ok=True)
 
 
+# ==============================================================================
 # الاتصال الآمن بقاعدة البيانات السحابية Supabase
+# ==============================================================================
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
@@ -73,7 +78,7 @@ if SUPABASE_URL and SUPABASE_KEY:
 
 
 def load_json(filepath, default_val):
-    # 1. القراءة من قاعدة البيانات السحابية Supabase أولاً لضمان عدم ضياع أي بيانات
+    """قراءة البيانات بأمان مع أولوية المزامنة السحابية من Supabase"""
     if supabase:
         try:
             res = supabase.table("app_data").select("data").eq("key", filepath).execute()
@@ -82,7 +87,6 @@ def load_json(filepath, default_val):
         except Exception:
             pass
 
-    # 2. إذا لم تكن موجودة في السحاب، يقرأ من الملف المحلي كاحتياط
     if os.path.exists(filepath):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
@@ -93,19 +97,57 @@ def load_json(filepath, default_val):
 
 
 def save_json(filepath, data):
-    # 1. حفظ نسخة محلية سريعة
+    """حفظ البيانات محلياً وفي السحاب لمنع ضياع أي سجل إطلاقاً"""
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
 
-    # 2. الحفظ الدائم في السحاب في Supabase فوراً
     if supabase:
         try:
             supabase.table("app_data").upsert({"key": filepath, "data": data}).execute()
         except Exception as e:
-            print(f"Error saving to Supabase: {e}")
+            pass
+
+
+# ==============================================================================
+# وظائف التشفير والأمان والحماية من هجمات التخمين والتوقيت (Security & Hashing)
+# ==============================================================================
+def hash_pin(pin: str) -> str:
+    """تشفير الرمز باستخدام SHA-256 مع Salt للنظام لحماية كلمات المرور"""
+    salt = os.getenv("SECRET_SALT", "CentralRag2026_SecureSalt")
+    return hashlib.sha256((str(pin).strip() + salt).encode("utf-8")).hexdigest()
+
+
+def verify_pin(entered_pin: str, stored_pin: str) -> bool:
+    """التحقق الآمن من الرمز بمقارنة مشفرة ثابتة الوقت (Timing-Attack Safe)"""
+    if not entered_pin or not stored_pin:
+        return False
+    e_str = str(entered_pin).strip()
+    s_str = str(stored_pin).strip()
+    if len(s_str) == 64:
+        return hmac.compare_digest(hash_pin(e_str), s_str)
+    return hmac.compare_digest(e_str, s_str)
+
+
+def log_audit(username: str, action: str, details: str, status: str = "SUCCESS"):
+    """سجل العمليات الأمني (Audit Log) لتتبع أي تعديل أو نشاط في النظام"""
+    try:
+        logs = load_json(AUDIT_LOG_FILE, [])
+        logs.append({
+            "timestamp": now_ts(),
+            "username": username,
+            "action": action,
+            "details": details,
+            "status": status
+        })
+        if len(logs) > 500:
+            logs = logs[-500:]
+        save_json(AUDIT_LOG_FILE, logs)
+    except Exception:
+        pass
+
 
 def jordan_now():
     return datetime.now(JORDAN_TZ)
@@ -116,8 +158,15 @@ def now_ts():
 
 
 def save_chat_media(uploaded_file, prefix="media"):
-    safe_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", getattr(uploaded_file, "name", "audio.wav"))
-    fname = f"{prefix}_{int(jordan_now().timestamp())}_{safe_name}"
+    """حفظ وسائط الشات مع تعقيم كامل لاسم الملف وفحص الامتدادات"""
+    ALLOWED_EXT = {"wav", "mp3", "ogg", "m4a", "png", "jpg", "jpeg", "webp", "pdf", "docx", "txt", "xlsx", "zip"}
+    raw_name = getattr(uploaded_file, "name", "file.dat")
+    ext = raw_name.split(".")[-1].lower() if "." in raw_name else ""
+    if ext not in ALLOWED_EXT:
+        return None, None
+
+    clean_base = re.sub(r"[^a-zA-Z0-9_.-]", "_", raw_name)
+    fname = f"{prefix}_{int(jordan_now().timestamp())}_{clean_base}"
     filepath = os.path.join(CHAT_MEDIA_DIR, fname)
     with open(filepath, "wb") as f:
         f.write(uploaded_file.getbuffer() if hasattr(uploaded_file, "getbuffer") else uploaded_file.read())
@@ -145,7 +194,7 @@ def get_physical_documents():
 
 
 # ==============================================================================
-# الالتزام بملفات الشركة فقط
+# الالتزام بملفات الشركة وحماية الـ RAG من هجمات الحقن (Prompt Injection)
 # ==============================================================================
 COMPANY_SCOPE_INSTRUCTION = (
     "أنت مساعد ذكاء اصطناعي داخلي خاص بموظفي وإدارة الشركة فقط. من المهم جداً"
@@ -157,10 +206,29 @@ COMPANY_SCOPE_INSTRUCTION = (
     " ردك أبداً.\n\nسؤال الموظف أو المدير: "
 )
 
+PROMPT_INJECTION_PATTERNS = [
+    r"ignore\s+(all\s+)?(previous|prior)\s+instructions",
+    r"تجاهل\s+(كل\s+)?(الأوامر|التعليمات)(\s+السابقة)?",
+    r"reveal\s+(the\s+)?(system\s+prompt|api\s+key|password|secret)",
+    r"(اكشف|اعطني|أظهر)\s+(لي\s+)?(التعليمات|المفتاح|الباسوورد|الرمز\s+السري)",
+    r"act\s+as\s+(admin|root|system)",
+    r"أنت\s+الآن\s+بصلاحي[ةه]\s+(المدير|الآدمن|النظام)",
+]
+
+def sanitize_prompt(text: str) -> str:
+    """فحص نصوص الأسئلة لمنع أي محاولة تجاوز لتعليمات النظام أو كشف الأسرار"""
+    for pattern in PROMPT_INJECTION_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return "BLOCKED"
+    return text.strip()
+
 
 def company_scoped_query(rag, question):
+    clean_q = sanitize_prompt(question)
+    if clean_q == "BLOCKED":
+        return "⚠️ عذراً، لا يمكن معالجة هذا الطلب لاحتوائه على صياغة تخالف سياسة الأمان وحماية معلومات الشركة."
     try:
-        return rag.query(COMPANY_SCOPE_INSTRUCTION + question)
+        return rag.query(COMPANY_SCOPE_INSTRUCTION + clean_q)
     except Exception as e:
         return f"⚠️ تعذر الحصول على إجابة: {str(e)}"
 
@@ -527,13 +595,16 @@ def render_chat_media_toolbar(current_user, on_send_callback, context_key="grp")
                 if voice_rec:
                     if st.button("📤 إرسال التسجيل الصوتي", key=f"btn_send_voice_{context_key}"):
                         path, fname = save_chat_media(voice_rec, prefix="voice")
-                        on_send_callback(
-                            content="🎤 رسالة صوتية",
-                            media_type="audio",
-                            media_path=path,
-                            media_name=fname,
-                        )
-                        st.rerun()
+                        if path:
+                            on_send_callback(
+                                content="🎤 رسالة صوتية",
+                                media_type="audio",
+                                media_path=path,
+                                media_name=fname,
+                            )
+                            st.rerun()
+                        else:
+                            st.error("نوع الملف غير مسموح.")
             else:
                 up_audio = st.file_uploader(
                     "ارفع مقطعاً صوتياً:", type=["wav", "mp3", "ogg", "m4a"], key=f"up_audio_{context_key}"
@@ -541,13 +612,16 @@ def render_chat_media_toolbar(current_user, on_send_callback, context_key="grp")
                 if up_audio:
                     if st.button("📤 إرسال الصوت", key=f"btn_send_up_voice_{context_key}"):
                         path, fname = save_chat_media(up_audio, prefix="voice")
-                        on_send_callback(
-                            content="🎤 رسالة صوتية",
-                            media_type="audio",
-                            media_path=path,
-                            media_name=fname,
-                        )
-                        st.rerun()
+                        if path:
+                            on_send_callback(
+                                content="🎤 رسالة صوتية",
+                                media_type="audio",
+                                media_path=path,
+                                media_name=fname,
+                            )
+                            st.rerun()
+                        else:
+                            st.error("نوع الملف غير مسموح.")
 
         with t_img:
             img_file = st.file_uploader(
@@ -557,13 +631,16 @@ def render_chat_media_toolbar(current_user, on_send_callback, context_key="grp")
             if img_file:
                 if st.button("📤 إرسال الصورة", key=f"btn_send_img_{context_key}"):
                     path, fname = save_chat_media(img_file, prefix="img")
-                    on_send_callback(
-                        content=img_caption.strip() if img_caption.strip() else "🖼️ صورة مرفقة",
-                        media_type="image",
-                        media_path=path,
-                        media_name=fname,
-                    )
-                    st.rerun()
+                    if path:
+                        on_send_callback(
+                            content=img_caption.strip() if img_caption.strip() else "🖼️ صورة مرفقة",
+                            media_type="image",
+                            media_path=path,
+                            media_name=fname,
+                        )
+                        st.rerun()
+                    else:
+                        st.error("نوع الصورة غير مسموح.")
 
         with t_file:
             doc_file = st.file_uploader(
@@ -573,13 +650,16 @@ def render_chat_media_toolbar(current_user, on_send_callback, context_key="grp")
             if doc_file:
                 if st.button("📤 إرسال الملف", key=f"btn_send_doc_{context_key}"):
                     path, fname = save_chat_media(doc_file, prefix="doc")
-                    on_send_callback(
-                        content=file_note.strip() if file_note.strip() else f"📎 مستند: {fname}",
-                        media_type="file",
-                        media_path=path,
-                        media_name=fname,
-                    )
-                    st.rerun()
+                    if path:
+                        on_send_callback(
+                            content=file_note.strip() if file_note.strip() else f"📎 مستند: {fname}",
+                            media_type="file",
+                            media_path=path,
+                            media_name=fname,
+                        )
+                        st.rerun()
+                    else:
+                        st.error("نوع الملف غير مسموح به لأسباب أمنية.")
 
         with t_poll:
             st.caption("أنشئ تصويتاً سريعاً وشاركه في المحادثة:")
@@ -926,6 +1006,7 @@ def sedra_handle_command(text, rag, admin_user):
                 "pinned": False,
             })
             save_group_chat(msgs)
+            log_audit(admin_user["username"], "SEDRA_SEND_GROUP", content)
             return f'حاضر يا مديرنا، تم إرسال رسالتك لقروب الشركة: "{content}"'
 
     # 2. إرسال رسالة خاصة لموظف
@@ -950,6 +1031,7 @@ def sedra_handle_command(text, rag, admin_user):
             })
             chats[thread_key] = thread
             save_private_chats(chats)
+            log_audit(admin_user["username"], "SEDRA_SEND_DM", f"To {target['username']}: {content}")
             return f'تم إرسال الرسالة الخاصة للموظف {target["name"]}: "{content}"'
         elif not target:
             return f'لم أجد موظفاً باسم "{emp_name_query}" في النظام.'
@@ -968,6 +1050,7 @@ def sedra_handle_command(text, rag, admin_user):
         target = find_employee_by_name(emp_name_query)
         if target and task_text:
             create_task_for_employee(target, task_text, source="عبر أوامر سيدرا")
+            log_audit(admin_user["username"], "SEDRA_ASSIGN_TASK", f"To {target['username']}: {task_text}")
             return f'تم تكليف الموظف {target["name"]} بالمهمة: "{task_text}"'
         elif not target:
             return f'لم يتم العثور على الموظف "{emp_name_query}".'
@@ -1007,7 +1090,7 @@ def render_sedra_tab(rag, admin_user):
 
     col_s1, col_s2 = st.columns(2)
     with col_s1:
-        st.info("💡 يمكنك ضبط وتعديل مفاتيح الـ API وعناوين السيرفرات بالكامل من تبويبة **'🔑 الـ API address للموقع'** في الأعلى.")
+        st.info("💡 يمكنك ضبط وتعديل مفاتيح الـ API وعناوين السيرفرات بالكامل من تبويبة **'🔑 الـ API للموقع'** في الأعلى.")
 
     with col_s2:
         if st.button("🔊 تجربة صوت سيدرا الآن", use_container_width=True):
@@ -1129,7 +1212,6 @@ def render_sedra_tab(rag, admin_user):
 
         chatgpt_orb_html = """
             <div style="direction: rtl; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 50%, #1e1b4b 0%, #090d16 100%); border-radius: 24px; padding: 22px; border: 1px solid #312e81; box-shadow: 0 10px 30px rgba(0,0,0,0.6);">
-                
                 <style>
                     @keyframes pulseGlow {
                         0% { transform: scale(0.97); box-shadow: 0 0 30px rgba(99, 102, 241, 0.5), inset 0 0 20px rgba(236, 72, 153, 0.4); }
@@ -1148,7 +1230,6 @@ def render_sedra_tab(rag, admin_user):
 
                 <div style="position: relative; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
                     <div id="rippleRing" style="position: absolute; width: 110px; height: 110px; border-radius: 50%; border: 2px solid #818cf8; opacity: 0; pointer-events: none;"></div>
-                    
                     <button id="orbBtn" style="
                         width: 95px; height: 95px; border-radius: 50%; border: none;
                         background: radial-gradient(circle at 35% 35%, #6366f1, #a855f7 60%, #3b82f6);
@@ -1176,14 +1257,13 @@ def render_sedra_tab(rag, admin_user):
                 let recog = null;
 
                 const win = window.parent || window;
-                const SpeechAPI = win.SpeechRecognition || win.webkitSpeechRecognition || window.SpeechRecognition || window.webkitSpeechRecognition;
+                const SpeechAPI = win.SpeechRecognition || win.webkitSpeechRecognition;
 
                 orb.onclick = function() {
                     if (!SpeechAPI) {
                         status.innerText = 'يرجى استخدام متصفح Google Chrome للتحدث الصوتي.';
                         return;
                     }
-
                     if (isRec) {
                         if (recog) recog.stop();
                         return;
@@ -1297,7 +1377,6 @@ def send_employee_email(
     to_email, employee_name, username, pin, job_title, action="update"
 ):
     cfg = load_json(EMAIL_CONFIG_FILE, {})
-    # قراءة الإيميل والباسوورد من الملف، أو السحب الآمن من Secrets
     sender = cfg.get("sender_email", "").strip() or os.getenv("EMAIL_SENDER", "").strip()
     password = cfg.get("sender_password", "").strip() or os.getenv("EMAIL_PASSWORD", "").strip()
     server = cfg.get("smtp_server", "").strip() or os.getenv("SMTP_SERVER", "smtp.gmail.com").strip()
@@ -1339,8 +1418,9 @@ def send_employee_email(
         return False, f"❌ فشل إرسال البريد: {str(e)}"
 
 
-
-# قراءة الرموز السرية بأمان من إعدادات الموقع
+# ==============================================================================
+# المستخدمون الافتراضيون وحماية كلمات المرور
+# ==============================================================================
 default_users = [
     {
         "id": 1,
@@ -1381,7 +1461,6 @@ if not os.path.exists(CALLS_FILE):
 if not os.path.exists(CHATS_FILE):
     save_json(CHATS_FILE, {})
 
-# تحميل أحدث البيانات من القرص دائماً لضمان التزامن الفوري عبر جميع الجلسات
 st.session_state.users_db = load_json(USERS_FILE, default_users)
 st.session_state.tasks_db = load_json(TASKS_FILE, [])
 st.session_state.calls_db = load_json(CALLS_FILE, [])
@@ -1411,32 +1490,60 @@ if "logged_user" not in st.session_state:
 if "real_admin_user" not in st.session_state:
     st.session_state.real_admin_user = None
 
-# تسجيل الدخول
+if "failed_logins" not in st.session_state:
+    st.session_state.failed_logins = 0
+
+if "lockout_until" not in st.session_state:
+    st.session_state.lockout_until = 0
+
+# ==============================================================================
+# شاشة تسجيل الدخول الآمنة مع حماية من هجمات التخمين (Rate Limiting)
+# ==============================================================================
 if st.session_state.logged_user is None:
-    st.title("🔐 تسجيل الدخول إلى النظام ")
+    st.title("🔐 تسجيل الدخول إلى النظام المركزي")
+    
+    # فحص القفل الزمني إذا تكررت المحاولات الخاطئة
+    current_time = time.time()
+    if current_time < st.session_state.lockout_until:
+        remaining = int(st.session_state.lockout_until - current_time)
+        st.error(f"⏳ تم قفل المحاولات مؤقتاً بسبب تكرار كلمة المرور الخاطئة. انتظر {remaining} ثانية ثم حاول مجدداً.")
+        st.stop()
+
     c1, c2, c3 = st.columns(3)
     with c2:
         with st.form("login_form"):
             u = st.text_input("اسم المستخدم:")
             p = st.text_input("رمز الدخول (PIN):", type="password")
             if st.form_submit_button("تسجيل الدخول"):
+                clean_u = u.strip().lower()
+                clean_p = p.strip()
+
+                # استخدام دالة verify_pin المشفرة والمقاومة للاختراق
                 matched = next(
                     (
                         x
                         for x in st.session_state.users_db
-                        if x["username"].lower() == u.strip().lower()
-                        and str(x["pin"]).strip() == p.strip()
+                        if x["username"].lower() == clean_u
+                        and verify_pin(clean_p, str(x["pin"]))
                     ),
                     None,
                 )
                 if matched:
+                    st.session_state.failed_logins = 0
                     st.session_state.logged_user = matched["username"]
                     if matched["role"] == "admin":
                         st.session_state.real_admin_user = matched["username"]
+                    log_audit(matched["username"], "LOGIN", "تسجيل دخول ناجح")
                     st.rerun()
                 else:
-                    st.error("بيانات الدخول غير صحيحة.")
-        st.info("💡 ادخل بحسابك .")
+                    st.session_state.failed_logins += 1
+                    log_audit(clean_u, "LOGIN_FAILED", "محاولة دخول فاشلة", status="FAILED")
+                    if st.session_state.failed_logins >= 5:
+                        st.session_state.lockout_until = time.time() + 60
+                        st.error("❌ تم قفل الدخول لمدة دقيقة واحدة لتكرار إدخال رمز خاطئ.")
+                    else:
+                        st.error(f"بيانات الدخول غير صحيحة. (محاولة {st.session_state.failed_logins} من 5)")
+        st.info("💡 أدخل اسم المستخدم ورمز الدخول الخاص بك.")
     st.stop()
 
 current_user = next(
@@ -1475,16 +1582,17 @@ with st.sidebar:
 
     st.markdown("---")
     if st.button("🚪 تسجيل الخروج"):
+        log_audit(current_user["username"], "LOGOUT", "تسجيل خروج")
         st.session_state.logged_user = None
         st.session_state.real_admin_user = None
         st.session_state["api_tab_unlocked"] = False
         st.rerun()
 
 # ==============================================================================
-#                      1. واجهة المدير (ADMIN DASHBOARD)
+#                       1. واجهة المدير (ADMIN DASHBOARD)
 # ==============================================================================
 if current_user["role"] == "admin":
-    st.title("🛡️ لوحة تحكم الإدارة العامة و المتابعة  ")
+    st.title("🛡️ لوحة تحكم الإدارة العامة والمتابعة")
 
     check_new_task_completions_for_admin(current_user["username"])
 
@@ -1505,16 +1613,18 @@ if current_user["role"] == "admin":
         tab_email,
         tab_docs,
         tab_api,
+        tab_audit,
     ) = st.tabs([
-        "💡 الأسئلة المتكرر",
-        "💬 اسئلتي",
+        "💡 الأسئلة المتكررة",
+        "💬 أسئلتي",
         chats_label,
         "🎙️ سيدرا",
-        "🎧 سجل المكالمات ",
+        "🎧 سجل المكالمات",
         "👥 إدارة الموظفين والمهام",
         "⚙️ إعدادات البريد الإلكتروني",
-        "📁 ملفات الشركة ",
-        "🔑 الـ API address للموقع",
+        "📁 ملفات الشركة",
+        "🔑 الـ API للموقع",
+        "🕵️ سجل الأمان (Audit)",
     ])
 
     with tab_faq:
@@ -1558,6 +1668,7 @@ if current_user["role"] == "admin":
                     calls = [c for c in calls if c.get("id") != call_id]
                     save_json(CALLS_FILE, calls)
                     st.session_state.calls_db = calls
+                    log_audit(current_user["username"], "DELETE_CALL", f"Call ID {call_id}")
                     st.success("تم الحذف.")
                     st.rerun()
 
@@ -1568,7 +1679,7 @@ if current_user["role"] == "admin":
                 with col_a1:
                     new_name = st.text_input("اسم الموظف الكامل:")
                     new_uname = st.text_input("اسم المستخدم (Username):")
-                    new_pin = st.text_input("رمز الدخول (PIN):")
+                    new_pin = st.text_input("رمز الدخول (PIN):", type="password")
                 with col_a2:
                     new_job = st.selectbox(
                         "المسمى الوظيفي:",
@@ -1593,10 +1704,12 @@ if current_user["role"] == "admin":
                                 max([u["id"] for u in current_users_list], default=0)
                                 + 1
                             )
+                            # حفظ الـ PIN مشفراً لحماية حساب الموظف
+                            raw_pin = new_pin.strip()
                             new_emp = {
                                 "id": new_id,
                                 "username": clean_un,
-                                "pin": new_pin.strip(),
+                                "pin": hash_pin(raw_pin),
                                 "name": new_name.strip(),
                                 "role": "employee",
                                 "job_title": new_job,
@@ -1605,14 +1718,15 @@ if current_user["role"] == "admin":
                             current_users_list.append(new_emp)
                             save_json(USERS_FILE, current_users_list)
                             st.session_state.users_db = current_users_list
-                            st.success(f"تمت إضافة الموظف '{new_name}' بنجاح!")
+                            log_audit(current_user["username"], "ADD_EMPLOYEE", f"Added {clean_un}")
+                            st.success(f"تمت إضافة الموظف '{new_name}' بنجاح وحفظه في السحاب!")
 
                             if send_welcome_mail and new_email.strip():
                                 ok, msg_mail = send_employee_email(
                                     new_email.strip(),
                                     new_name.strip(),
                                     clean_un,
-                                    new_pin.strip(),
+                                    raw_pin,
                                     new_job,
                                     action="create",
                                 )
@@ -1636,7 +1750,10 @@ if current_user["role"] == "admin":
                             "اسم المستخدم:", value=emp["username"], key=f"u_{emp_id}"
                         )
                         p_val = st.text_input(
-                            "رمز الدخول (PIN):", value=emp["pin"], key=f"p_{emp_id}"
+                            "تغيير رمز الدخول (PIN جديد):",
+                            type="password",
+                            placeholder="اتركه فارغاً دون تغيير",
+                            key=f"p_{emp_id}",
                         )
                     with c2:
                         e_val = st.text_input(
@@ -1652,21 +1769,24 @@ if current_user["role"] == "admin":
                     with btn_col1:
                         if st.button("💾 حفظ البيانات", key=f"save_email_{emp_id}"):
                             emp["username"] = u_val.strip()
-                            emp["pin"] = p_val.strip()
+                            if p_val.strip():
+                                emp["pin"] = hash_pin(p_val.strip())
                             emp["email"] = e_val.strip()
                             emp["job_title"] = j_val.strip()
                             save_json(USERS_FILE, current_users_list)
                             st.session_state.users_db = current_users_list
-                            st.success("تم الحفظ!")
+                            log_audit(current_user["username"], "UPDATE_EMPLOYEE", f"Updated {emp['username']}")
+                            st.success("تم الحفظ بنجاح!")
                             st.rerun()
 
                     with btn_col2:
                         if st.button("📧 إرسال إيميل", key=f"send_only_{emp_id}"):
+                            pin_to_send = p_val.strip() if p_val.strip() else "(الرمز السري المحفوظ لديك مسبقاً)"
                             ok, msg_info = send_employee_email(
                                 emp.get("email", ""),
                                 emp_name,
                                 emp["username"],
-                                emp["pin"],
+                                pin_to_send,
                                 emp["job_title"],
                                 action="update",
                             )
@@ -1680,6 +1800,7 @@ if current_user["role"] == "admin":
                             ]
                             save_json(USERS_FILE, current_users_list)
                             st.session_state.users_db = current_users_list
+                            log_audit(current_user["username"], "DELETE_EMPLOYEE", f"Deleted {emp_name}")
                             st.warning(f"تم حذف {emp_name}.")
                             st.rerun()
 
@@ -1697,6 +1818,7 @@ if current_user["role"] == "admin":
                                 create_task_for_employee(
                                     emp, task_text.strip(), source="من لوحة الإدارة"
                                 )
+                                log_audit(current_user["username"], "ASSIGN_TASK", f"To {emp['username']}: {task_text.strip()}")
                                 st.success("تم إرسال المهمة!")
                                 st.rerun()
 
@@ -1706,12 +1828,12 @@ if current_user["role"] == "admin":
         with st.form("smtp_config_form"):
             s_email = st.text_input(
                 "بريدك الإلكتروني (Gmail):",
-                value=cfg.get("sender_email", ""),
+                value=cfg.get("sender_email", "") or os.getenv("EMAIL_SENDER", ""),
             )
             s_pass = st.text_input(
                 "كلمة مرور التطبيقات (App Password):",
                 type="password",
-                value=cfg.get("sender_password", ""),
+                value=cfg.get("sender_password", "") or os.getenv("EMAIL_PASSWORD", ""),
             )
             s_server = st.text_input(
                 "خادم SMTP:",
@@ -1729,23 +1851,46 @@ if current_user["role"] == "admin":
                     "smtp_port": s_port,
                 }
                 save_json(EMAIL_CONFIG_FILE, st.session_state.email_config)
+                log_audit(current_user["username"], "UPDATE_SMTP", "تم تحديث إعدادات البريد")
                 st.success("تم الحفظ بنجاح!")
 
     with tab_docs:
-        st.subheader("📁 ملفات الشركة")
+        st.subheader("📁 ملفات الشركة وحماية قاعدة المعرفة")
         uploaded_files = st.file_uploader(
-            "رفع ملفات جديدة:", type=["pdf", "txt", "docx"], accept_multiple_files=True
+            "رفع ملفات جديدة (PDF, TXT, DOCX بحد أقصى 20 ميجابايت):",
+            type=["pdf", "txt", "docx"],
+            accept_multiple_files=True
         )
         if uploaded_files:
-            if st.button("🚀 بدء الحفظ وتحديث "):
-                with st.spinner("جاري حفظ الملفات وتحديث..."):
+            if st.button("🚀 بدء الحفظ وتحديث قاعدة المعرفة"):
+                with st.spinner("جاري فحص وحفظ الملفات..."):
+                    MAX_SIZE_BYTES = 20 * 1024 * 1024
+                    ALLOWED_EXTS = {".pdf", ".txt", ".docx"}
+                    success_count = 0
+
                     for uf in uploaded_files:
-                        target_path = os.path.join(DOCS_DIR, uf.name)
+                        raw_name = os.path.basename(uf.name)
+                        clean_name = re.sub(r"[^a-zA-Z0-9_.\u0600-\u06FF-]", "_", raw_name)
+                        _, ext = os.path.splitext(clean_name)
+
+                        if ext.lower() not in ALLOWED_EXTS:
+                            st.error(f"❌ الملف {raw_name} امتداده غير مسموح به لأسباب أمنية.")
+                            continue
+
+                        if uf.size > MAX_SIZE_BYTES:
+                            st.error(f"❌ الملف {raw_name} يتجاوز الحجم المسموح (20 ميجابايت).")
+                            continue
+
+                        target_path = os.path.join(DOCS_DIR, clean_name)
                         with open(target_path, "wb") as f_out:
                             f_out.write(uf.getbuffer())
-                    sync_res = rag.sync_documents()
-                    st.success("تم الحفظ وتحديث !")
-                    st.rerun()
+                        success_count += 1
+
+                    if success_count > 0:
+                        sync_res = rag.sync_documents()
+                        log_audit(current_user["username"], "UPLOAD_DOCS", f"Uploaded {success_count} files")
+                        st.success("تم الحفظ وتحديث قاعدة المعرفة بنجاح!")
+                        st.rerun()
 
         st.markdown("---")
         st.write("#### 📑 ملفات الشركة المسجلة (يمكنك حذف أي ملف):")
@@ -1762,6 +1907,7 @@ if current_user["role"] == "admin":
                             if os.path.exists(finfo["path"]):
                                 os.remove(finfo["path"])
                             rag.sync_documents()
+                            log_audit(current_user["username"], "DELETE_DOC", f"Deleted {fname}")
                             st.success(f"تم حذف {fname} وتحديث قاعدة المعرفة بنجاح!")
                             st.rerun()
                         except Exception as e:
@@ -1770,14 +1916,14 @@ if current_user["role"] == "admin":
             st.info("لا توجد ملفات.")
 
     # ==========================================================================
-    # تبويبة الـ API address للموقع (محمية برمز الأدمن المتزامن)
+    # تبويبة الـ API للموقع (محمية بالـ PIN المشفر)
     # ==========================================================================
     with tab_api:
-        st.subheader("🔑 إعدادات الـ API address وعناوين الذكاء الاصطناعي")
+        st.subheader("🔑 إعدادات الـ API وعناوين الذكاء الاصطناعي")
 
         all_users = load_json(USERS_FILE, default_users)
         admin_obj = next((u for u in all_users if u["role"] == "admin"), None)
-        admin_real_pin = str(admin_obj["pin"]).strip() if admin_obj else "0000"
+        admin_stored_pin = str(admin_obj["pin"]).strip() if admin_obj else "0000"
 
         if "api_tab_unlocked" not in st.session_state:
             st.session_state["api_tab_unlocked"] = False
@@ -1787,8 +1933,9 @@ if current_user["role"] == "admin":
             with st.form("api_unlock_form"):
                 entered_pin = st.text_input("رمز الأدمن (PIN):", type="password")
                 if st.form_submit_button("🔓 تأكيد الدخول إلى إعدادات الـ API"):
-                    if entered_pin.strip() == admin_real_pin:
+                    if verify_pin(entered_pin, admin_stored_pin):
                         st.session_state["api_tab_unlocked"] = True
+                        log_audit(current_user["username"], "UNLOCK_API_TAB", "فتح إعدادات الـ API")
                         st.success("✅ تم التحقق بنجاح!")
                         st.rerun()
                     else:
@@ -1838,9 +1985,9 @@ if current_user["role"] == "admin":
                 st.markdown("#### 🔐 رمز الأدمن المشترك (PIN)")
                 st.caption("تغييرك لهذا الرمز هنا يغير تلقائياً رمز تسجيل دخول الأدمن ورمز الدخول لهذه التبويبة.")
                 new_admin_pin = st.text_input(
-                    "رمز الدخول الخاص بالأدمن (PIN):",
-                    value=admin_real_pin,
+                    "رمز الدخول الجديد الخاص بالأدمن (PIN):",
                     type="password",
+                    placeholder="اتركه فارغاً إن لم ترغب في تغييره"
                 )
 
                 if st.form_submit_button("💾 حفظ كافة إعدادات الـ API وتحديث الرمز فوراً"):
@@ -1858,15 +2005,34 @@ if current_user["role"] == "admin":
                         os.environ["OPENAI_BASE_URL"] = api_addr.strip()
 
                     if new_admin_pin.strip() and admin_obj:
-                        admin_obj["pin"] = new_admin_pin.strip()
+                        admin_obj["pin"] = hash_pin(new_admin_pin.strip())
                         save_json(USERS_FILE, all_users)
                         st.session_state.users_db = all_users
+                        log_audit(current_user["username"], "CHANGE_ADMIN_PIN", "تم تغيير رمز الأدمن")
 
                     st.success("✅ تم حفظ كافة إعدادات الـ API وعنوان السيرفر وتحديث رمز الأدمن بنجاح!")
                     st.rerun()
 
+    # ==========================================================================
+    # تبويبة سجل العمليات الأمني (AUDIT LOG TAB)
+    # ==========================================================================
+    with tab_audit:
+        st.subheader("🕵️ سجل التدقيق الأمني ومراقبة النظام (Audit Trail)")
+        st.caption("يعرض هذا السجل كافة الحركات الحساسة في النظام (دخول، خروج، إضافة/حذف موظفين، تعديل ملفات، مهام).")
+        
+        audit_records = load_json(AUDIT_LOG_FILE, [])
+        if audit_records:
+            df_audit = pd.DataFrame(reversed(audit_records))
+            st.dataframe(df_audit, use_container_width=True)
+            if st.button("🗑️ مسح سجل الأمان", key="clear_audit_log"):
+                save_json(AUDIT_LOG_FILE, [])
+                st.success("تم مسح السجل.")
+                st.rerun()
+        else:
+            st.info("لا توجد أحداث مسجلة بعد في سجل الأمان.")
+
 # ==============================================================================
-#                      2. واجهة الموظف (EMPLOYEE DASHBOARD)
+#                       2. واجهة الموظف (EMPLOYEE DASHBOARD)
 # ==============================================================================
 else:
     st.title(f"💼 واجهة عمل الموظف: {current_user['name']}")
@@ -1894,10 +2060,10 @@ else:
 
     t0, t_chats, t1, t2, t3 = st.tabs([
         "💡 الأسئلة الشائعة",
-        chats_label,
-        "📞 المكالمات المحولة إليّ ",
+        "💬 قروب الشركة والمحادثات",
+        "📞 المكالمات المحولة إليّ",
         tasks_label,
-        "💬 الشات الذكي لك",
+        "💬 الشات الذكي",
     ])
 
     with t0:
@@ -1926,6 +2092,7 @@ else:
                 c["status"] = "تم الحل بواسطة الموظف"
                 save_json(CALLS_FILE, calls)
                 st.session_state.calls_db = calls
+                log_audit(current_user["username"], "RESOLVE_CALL", f"Call ID {cid}")
                 st.success("تم الحل!")
                 st.rerun()
 
@@ -1946,6 +2113,7 @@ else:
                             tt["completed_at"] = jordan_now().strftime("%Y-%m-%d %H:%M")
                     save_json(TASKS_FILE, tasks_current)
                     st.session_state.tasks_db = tasks_current
+                    log_audit(current_user["username"], "COMPLETE_TASK", f"Task ID {t_id}")
                     st.success("تم التأكيد!")
                     st.rerun()
 
