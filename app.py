@@ -1264,13 +1264,14 @@ def send_employee_email(
     to_email, employee_name, username, pin, job_title, action="update"
 ):
     cfg = load_json(EMAIL_CONFIG_FILE, {})
-    sender = cfg.get("sender_email", "").strip()
-    password = cfg.get("sender_password", "").strip()
-    server = cfg.get("smtp_server", "smtp.gmail.com").strip()
-    port = int(cfg.get("smtp_port", 587))
+    # قراءة الإيميل والباسوورد من الملف، أو السحب الآمن من Secrets
+    sender = cfg.get("sender_email", "").strip() or os.getenv("EMAIL_SENDER", "").strip()
+    password = cfg.get("sender_password", "").strip() or os.getenv("EMAIL_PASSWORD", "").strip()
+    server = cfg.get("smtp_server", "").strip() or os.getenv("SMTP_SERVER", "smtp.gmail.com").strip()
+    port = int(cfg.get("smtp_port") or os.getenv("SMTP_PORT", 587))
 
     if not sender or not password:
-        return False, "⚠️ لم يتم ضبط بريد الإدارة في الإعدادات."
+        return False, "⚠️ لم يتم ضبط بريد الإدارة في الإعدادات أو الـ Secrets."
     if not to_email or "@" not in to_email:
         return False, "⚠️ البريد الإلكتروني للموظف غير صالح."
 
