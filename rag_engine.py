@@ -4,7 +4,7 @@ import os
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_groq import ChatGroq
 
-MY_GROQ_KEY = "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"
+api_key = os.getenv("GROQ_API_KEY")
 
 
 class EnterpriseRAG:
