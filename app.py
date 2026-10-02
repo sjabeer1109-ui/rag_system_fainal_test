@@ -59,7 +59,30 @@ os.makedirs(DOCS_DIR, exist_ok=True)
 os.makedirs(CHAT_MEDIA_DIR, exist_ok=True)
 
 
+# الاتصال الآمن بقاعدة البيانات السحابية Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        from supabase import create_client
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception as e:
+        supabase = None
+
+
 def load_json(filepath, default_val):
+    # 1. القراءة من قاعدة البيانات السحابية Supabase أولاً لضمان عدم ضياع أي بيانات
+    if supabase:
+        try:
+            res = supabase.table("app_data").select("data").eq("key", filepath).execute()
+            if res.data and len(res.data) > 0:
+                return res.data[0]["data"]
+        except Exception:
+            pass
+
+    # 2. إذا لم تكن موجودة في السحاب، يقرأ من الملف المحلي كاحتياط
     if os.path.exists(filepath):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
@@ -70,9 +93,19 @@ def load_json(filepath, default_val):
 
 
 def save_json(filepath, data):
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    # 1. حفظ نسخة محلية سريعة
+    try:
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
+    # 2. الحفظ الدائم في السحاب في Supabase فوراً
+    if supabase:
+        try:
+            supabase.table("app_data").upsert({"key": filepath, "data": data}).execute()
+        except Exception as e:
+            print(f"Error saving to Supabase: {e}")
 
 def jordan_now():
     return datetime.now(JORDAN_TZ)
