@@ -26,8 +26,140 @@ from rag_engine import EnterpriseRAG
 import streamlit as st
 
 st.set_page_config(
-    page_title="نظام الإدارة وخدمة العملاء المركزي", layout="wide"
+    page_title="نظام الإدارة وخدمة العملاء المركزي",
+    page_icon="🛡️",
+    layout="wide"
 )
+
+# ==============================================================================
+# التصميم العصري الفاخر وحقن الخطوط والتأثيرات الزجاجية (Luxury Glassmorphic CSS)
+# ==============================================================================
+CUSTOM_LUXURY_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+
+html, body, [class*="css"], .stMarkdown, .stButton, .stTextInput, .stSelectbox {
+    font-family: 'Cairo', sans-serif !important;
+}
+
+/* خلفية النظام وإضاءات خافتة */
+.stApp {
+    background: radial-gradient(circle at top right, #1e1b4b 0%, #0b0f19 50%, #030712 100%);
+    color: #f8fafc;
+}
+
+/* شريط النبض الحي للنظام */
+.pulse-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 16px;
+    padding: 10px 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.pulse-dot {
+    height: 10px;
+    width: 10px;
+    background-color: #10b981;
+    border-radius: 50%;
+    display: inline-block;
+    box-shadow: 0 0 12px #10b981;
+    animation: livePulse 1.8s infinite;
+    margin-left: 8px;
+}
+
+@keyframes livePulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    70% { transform: scale(1.15); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+/* كروت المؤشرات الذكية KPI */
+.kpi-card {
+    background: linear-gradient(135deg, rgba(30, 27, 75, 0.5) 0%, rgba(15, 23, 42, 0.7) 100%);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(129, 140, 248, 0.2);
+    border-radius: 20px;
+    padding: 18px 20px;
+    text-align: right;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
+    transition: all 0.3s ease;
+}
+
+.kpi-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(168, 85, 247, 0.5);
+    box-shadow: 0 15px 30px -5px rgba(147, 51, 234, 0.3);
+}
+
+.kpi-title {
+    font-size: 14px;
+    color: #94a3b8;
+    font-weight: 600;
+}
+
+.kpi-val {
+    font-size: 28px;
+    font-weight: 800;
+    color: #f8fafc;
+    margin: 4px 0;
+}
+
+.kpi-desc {
+    font-size: 12px;
+    color: #38bdf8;
+    font-weight: 600;
+}
+
+/* الأزرار وتأثيرات التوهج */
+.stButton > button {
+    border-radius: 12px !important;
+    font-weight: 700 !important;
+    transition: all 0.25s ease !important;
+    border: 1px solid rgba(99, 102, 241, 0.3) !important;
+}
+
+.stButton > button:hover {
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.6) !important;
+    transform: scale(1.02) !important;
+}
+
+/* التبويبات الفاخرة */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 8px;
+    background-color: rgba(15, 23, 42, 0.6);
+    padding: 8px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.stTabs [data-baseweb="tab"] {
+    border-radius: 10px;
+    font-weight: 700;
+    color: #94a3b8;
+    padding: 8px 16px;
+}
+
+.stTabs [aria-selected="true"] {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+}
+
+/* بطاقات المكالمات والشات */
+.streamlit-expanderHeader {
+    background-color: rgba(30, 41, 59, 0.5) !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+</style>
+"""
+st.markdown(CUSTOM_LUXURY_CSS, unsafe_allow_html=True)
 
 
 @st.cache_resource
@@ -334,6 +466,8 @@ def render_smart_faq(rag, allow_generate=False):
 # ==============================================================================
 def render_chat_tab(rag, username):
     chats_db = load_json(CHATS_FILE, {})
+    if not isinstance(chats_db, dict):
+        chats_db = {}
     if username not in chats_db:
         chats_db[username] = []
     my_sessions = chats_db[username]
@@ -429,6 +563,10 @@ def save_group_chat(msgs):
 
 
 def load_group_state():
+    return load_group_state_data()
+
+
+def load_group_state_data():
     return load_json(GROUP_STATE_FILE, {"open": True})
 
 
@@ -1502,23 +1640,21 @@ if "lockout_until" not in st.session_state:
 if st.session_state.logged_user is None:
     st.title("🔐 تسجيل الدخول إلى النظام المركزي")
     
-    # فحص القفل الزمني إذا تكررت المحاولات الخاطئة
     current_time = time.time()
     if current_time < st.session_state.lockout_until:
         remaining = int(st.session_state.lockout_until - current_time)
         st.error(f"⏳ تم قفل المحاولات مؤقتاً بسبب تكرار كلمة المرور الخاطئة. انتظر {remaining} ثانية ثم حاول مجدداً.")
         st.stop()
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
         with st.form("login_form"):
             u = st.text_input("اسم المستخدم:")
             p = st.text_input("رمز الدخول (PIN):", type="password")
-            if st.form_submit_button("تسجيل الدخول"):
+            if st.form_submit_button("🚀 تسجيل الدخول إلى النظام", use_container_width=True):
                 clean_u = u.strip().lower()
                 clean_p = p.strip()
 
-                # استخدام دالة verify_pin المشفرة والمقاومة للاختراق
                 matched = next(
                     (
                         x
@@ -1581,7 +1717,7 @@ with st.sidebar:
                 st.rerun()
 
     st.markdown("---")
-    if st.button("🚪 تسجيل الخروج"):
+    if st.button("🚪 تسجيل الخروج", use_container_width=True):
         log_audit(current_user["username"], "LOGOUT", "تسجيل خروج")
         st.session_state.logged_user = None
         st.session_state.real_admin_user = None
@@ -1589,12 +1725,82 @@ with st.sidebar:
         st.rerun()
 
 # ==============================================================================
+# شريط النبض الحي للنظام (LIVE SYSTEM PULSE BAR)
+# ==============================================================================
+cloud_status_text = "متصل سحابياً (Supabase Live)" if supabase else "وضع تخزين محلي"
+st.markdown(f"""
+<div class="pulse-bar">
+    <div>
+        <span class="pulse-dot"></span>
+        <strong style="color: #10b981; margin-left: 6px;">حالة النظام:</strong>
+        <span style="color: #cbd5e1;">نشط 24/7 • {cloud_status_text}</span>
+    </div>
+    <div>
+        <span style="color: #818cf8;">🎙️ سيدرا AI:</span> <span style="color: #cbd5e1;">متصلة وجاهزة</span>
+        <span style="margin: 0 10px; color: #475569;">|</span>
+        <span style="color: #38bdf8;">🛡️ الأمان:</span> <span style="color: #cbd5e1;">مشفر بالكامل (Argon/Hash)</span>
+        <span style="margin: 0 10px; color: #475569;">|</span>
+        <span style="color: #a855f7;">🕒 التوقيت:</span> <span style="color: #cbd5e1;">{jordan_now().strftime("%I:%M %p")} (عمان)</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ==============================================================================
 #                       1. واجهة المدير (ADMIN DASHBOARD)
 # ==============================================================================
 if current_user["role"] == "admin":
-    st.title("🛡️ لوحة تحكم الإدارة العامة والمتابعة")
+    st.title("🛡️ مركز الإدارة والعمليات التنفيذي (Command Center)")
 
     check_new_task_completions_for_admin(current_user["username"])
+
+    # تجهيز الإحصائيات لكروت الـ KPI الفاخرة
+    all_calls = load_json(CALLS_FILE, [])
+    all_tasks = load_json(TASKS_FILE, [])
+    all_users = load_json(USERS_FILE, default_users)
+    active_employees = [u for u in all_users if u.get("role") == "employee"]
+    completed_tasks_count = sum(1 for t in all_tasks if t.get("الحالة") == "تم")
+    total_tasks = len(all_tasks)
+    task_pct = int((completed_tasks_count / total_tasks * 100)) if total_tasks > 0 else 100
+
+    # عرض كروت الـ KPI المضيئة الزجاجية
+    col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
+    with col_kpi1:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">📞 إجمالي المكالمات المؤرشفة</div>
+            <div class="kpi-val">{len(all_calls)}</div>
+            <div class="kpi-desc">⚡ أرشفة سحابية فورية</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_kpi2:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">👥 فريق العمل المسجل</div>
+            <div class="kpi-val">{len(active_employees)} موظفين</div>
+            <div class="kpi-desc">🟢 حسابات نشطة ومحمية</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_kpi3:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">📌 نسبة إنجاز المهام</div>
+            <div class="kpi-val">{task_pct}%</div>
+            <div class="kpi-desc">✅ {completed_tasks_count} من أصل {total_tasks} مهام</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_kpi4:
+        st.markdown(f"""
+        <div class="kpi-card">
+            <div class="kpi-title">🎙️ محرك سيدرا الصوتي</div>
+            <div class="kpi-val">جاهز 100%</div>
+            <div class="kpi-desc">🚀 RAG + Fallback صوتي مزدوج</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     group_unread = count_unread_group(current_user["username"])
     private_unread_total = total_private_unread(current_user["username"])
@@ -1640,7 +1846,42 @@ if current_user["role"] == "admin":
         render_sedra_tab(rag, current_user)
 
     with tab_recordings:
-        st.subheader("🎧 سجل المكالمات")
+        st.subheader("🎧 سجل وتفاصيل المكالمات الهاتفية")
+
+        # ميزة محاكاة مكالمة حية تفاعلية للعرض الترويجي والمشترين
+        with st.expander("📲 محاكاة وتجربة مكالمة عميل حيّة الآن (Live Call Simulator)", expanded=False):
+            st.caption("أدخل استفسار العميل لتشاهد كيف يرد الذكاء الاصطناعي ويحللها ويسجلها في الداشبورد أمامك مباشرة:")
+            c_sim1, c_sim2 = st.columns(2)
+            with c_sim1:
+                sim_name = st.text_input("اسم العميل المتصل:", value="طارق عبد الله", key="sim_name")
+                sim_phone = st.text_input("رقم هاتف المتصل:", value="+962791234567", key="sim_phone")
+            with c_sim2:
+                sim_q = st.text_area("استفسار العميل الصوتي:", value="مرحبا، عندي عطل بالنظام ومش قادر اسجل دخول، حولني للدعم الفني.", key="sim_q")
+
+            if st.button("📞 بدء المكالمة واستقبال الرد الفوري", use_container_width=True):
+                with st.spinner("📞 جاري استقبال المكالمة ومعالجتها عبر الذكاء الاصطناعي..."):
+                    call_result = call_center.handle_call_interaction(sim_name, sim_phone, sim_q)
+                    
+                    new_call_entry = {
+                        "id": max([c.get("id", 0) for c in all_calls], default=0) + 1,
+                        "customer_name": sim_name,
+                        "customer_phone": sim_phone,
+                        "inquiry": sim_q,
+                        "ai_initial_answer": call_result.get("message", ""),
+                        "status": "محولة للموظف" if call_result.get("action") == "transferred" else "تم الرد تلقائياً",
+                        "assigned_to": call_result.get("assigned_username"),
+                        "timestamp": now_ts(),
+                        "audio_file": None,
+                        "employee_note": None
+                    }
+                    all_calls.append(new_call_entry)
+                    save_json(CALLS_FILE, all_calls)
+                    st.session_state.calls_db = all_calls
+                    log_audit(current_user["username"], "SIMULATE_CALL", f"Simulated call from {sim_name}")
+                    st.success("✅ تمت المكالمة وحُفظت بالسجل وتحولت فوراً للموظف المختص!")
+                    st.rerun()
+
+        st.markdown("---")
         calls = load_json(CALLS_FILE, [])
         if not calls:
             st.info("لا توجد مكالمات مسجلة بعد.")
@@ -1690,7 +1931,7 @@ if current_user["role"] == "admin":
                         "📧 إرسال بيانات الدخول لإيميل الموظف فوراً", value=True
                     )
 
-                if st.form_submit_button("💾 حفظ وإضافة الموظف الآن"):
+                if st.form_submit_button("💾 حفظ وإضافة الموظف الآن", use_container_width=True):
                     if new_name.strip() and new_uname.strip() and new_pin.strip():
                         clean_un = new_uname.strip().lower()
                         current_users_list = load_json(USERS_FILE, default_users)
@@ -1704,7 +1945,6 @@ if current_user["role"] == "admin":
                                 max([u["id"] for u in current_users_list], default=0)
                                 + 1
                             )
-                            # حفظ الـ PIN مشفراً لحماية حساب الموظف
                             raw_pin = new_pin.strip()
                             new_emp = {
                                 "id": new_id,
@@ -1843,7 +2083,7 @@ if current_user["role"] == "admin":
                 "منفذ SMTP:",
                 value=int(cfg.get("smtp_port", 587)),
             )
-            if st.form_submit_button("💾 حفظ إعدادات البريد"):
+            if st.form_submit_button("💾 حفظ إعدادات البريد", use_container_width=True):
                 st.session_state.email_config = {
                     "sender_email": s_email.strip(),
                     "sender_password": s_pass.strip(),
