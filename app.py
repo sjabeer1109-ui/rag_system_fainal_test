@@ -362,6 +362,35 @@ LAST_READ_FILE = "last_read.json"
 SEDRA_CHAT_FILE = "sedra_chat.json"
 SETTINGS_FILE = "settings.json"
 AUDIT_LOG_FILE = "audit_log.json"
+
+APPOINTMENTS_FILE = "appointments.json"
+
+def load_appointments():
+    return load_json(APPOINTMENTS_FILE, [])
+
+def save_appointments(data):
+    save_json(APPOINTMENTS_FILE, data)
+
+def create_appointment(customer_name, customer_phone="", service="استشارة عامة", appt_date="", appt_time="", assigned_to="ahmad", notes="", source="نظام المواعيد"):
+    appts = load_appointments()
+    new_id = max([a.get("id", 0) for a in appts], default=0) + 1
+    new_appt = {
+        "id": new_id,
+        "customer_name": customer_name.strip(),
+        "customer_phone": customer_phone.strip(),
+        "service": service.strip() if service else "استشارة عامة",
+        "date": appt_date.strip() if appt_date else (jordan_now() + timedelta(days=1)).strftime("%Y-%m-%d"),
+        "time": appt_time.strip() if appt_time else "12:00 م",
+        "status": "مؤكد",  # مؤكد, قيد الانتظار, مكتمل, ملغي
+        "assigned_to": assigned_to.strip() if assigned_to else "ahmad",
+        "notes": notes.strip(),
+        "source": source,
+        "created_at": now_ts()
+    }
+    appts.append(new_appt)
+    save_appointments(appts)
+    return new_appt
+
 RECORDINGS_DIR = "recordings"
 DOCS_DIR = "documents"
 CHAT_MEDIA_DIR = "chat_media"
@@ -1393,7 +1422,258 @@ def sedra_handle_command(text, rag, admin_user):
             else "جميع المهام مكتملة ولا توجد مهام معلقة."
         )
 
+    
+    # 5. أوامر حجز واستعلام المواعيد الذكية
+    m_appt = re.search(
+        r"(?:احجز|حجز|سجل|ضيف|إحجز)\s+(?:لي\s+)?موعد(?:اً|ا)?\s+(?:ل|إلى|الى)?\s*([^:\-]+?)(?:\s+(?:يوم|بتاريخ)\s+([^:\-]+?))?(?:\s+(?:الساعة|ساعة)\s+([^:\-]+?))?(?:$|\s*[:\-]\s*(.+))",
+        t,
+    )
+    if m_appt or "احجز موعد" in t or "حجز موعد" in t:
+        c_name = m_appt.group(1).strip() if (m_appt and m_appt.group(1)) else "عميل جديد"
+        c_date = m_appt.group(2).strip() if (m_appt and m_appt.group(2)) else (jordan_now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        c_time = m_appt.group(3).strip() if (m_appt and m_appt.group(3)) else "01:00 م"
+        extra_notes = m_appt.group(4).strip() if (m_appt and m_appt.group(4)) else ""
+
+        new_appt = create_appointment(
+            customer_name=c_name,
+            customer_phone="",
+            service="حجز عبر سيدرا الذكية",
+            appt_date=c_date,
+            appt_time=c_time,
+            assigned_to="ahmad",
+            notes=extra_notes,
+            source="عبر أوامر سيدرا الصوتية"
+        )
+        log_audit(admin_user["username"], "SEDRA_BOOK_APPT", f"Booked for {c_name} on {c_date} {c_time}")
+        return f'أهلاً بك يا مديرنا، تم حجز الموعد بنجاح للعميل "{c_name}" بتاريخ {c_date} الساعة {c_time}، وتمت إضافته فوراً إلى تبويبة المواعيد والحجوزات.'
+
+    if any(kw in t for kw in ["شو في مواعيد", "مواعيد اليوم", "جدول المواعيد", "المواعيد القادمة", "قائمة المواعيد", "استعلم عن المواعيد"]):
+        appts = load_appointments()
+        today_str = jordan_now().strftime("%Y-%m-%d")
+        active_appts = [a for a in appts if a.get("status") != "ملغي"]
+        if not active_appts:
+            return "لا توجد مواعيد مسجلة حالياً في النظام، يمكنك حجز موعد جديد في أي وقت بصوتك أو من تبويبة المواعيد."
+
+        lines = []
+        for a in active_appts[:5]:
+            lines.append(f"• {a['customer_name']} - {a['service']} (بتاريخ {a['date']} الساعة {a['time']}) - [{a['status']}]")
+        return "جدول المواعيد المسجلة حالياً:\n" + "\n".join(lines)
+
+    if any(kw in t for kw in ["الغاء موعد", "إلغاء موعد", "كنسل موعد"]):
+        appts = load_appointments()
+        m_cancel = re.search(r"(?:الغاء|إلغاء|كنسل)\s+(?:موعد\s+)?(?:ل|إلى|الى)?\s*(.+)", t)
+        target_name = m_cancel.group(1).strip() if m_cancel else ""
+        canceled_any = False
+        for a in appts:
+            if target_name and (target_name in a["customer_name"] or a["customer_name"] in target_name):
+                a["status"] = "ملغي"
+                canceled_any = True
+                break
+        if canceled_any:
+            save_appointments(appts)
+            log_audit(admin_user["username"], "SEDRA_CANCEL_APPT", f"Cancelled appt for {target_name}")
+            return f'تم إلغاء الموعد الخاص بـ "{target_name}" بنجاح وتحديث حالته في جدول المواعيد.'
+        else:
+            return f'لم أجد موعداً مسجلاً باسم "{target_name}" لإلغائه.'
+
     return company_scoped_query(rag, t)
+
+
+
+def render_appointments_tab(current_user):
+    st.subheader("📅 جدول وإدارة المواعيد والحجوزات الذكية")
+
+    appts = load_appointments()
+    today_str = jordan_now().strftime("%Y-%m-%d")
+    is_admin = current_user["role"] == "admin"
+    
+    if not is_admin:
+        user_appts = [a for a in appts if a.get("assigned_to") == current_user["username"]]
+    else:
+        user_appts = appts
+
+    # 1. كروت مؤشرات المواعيد
+    col_a1, col_a2, col_a3, col_a4 = st.columns(4)
+    today_count = sum(1 for a in user_appts if a.get("date") == today_str and a.get("status") != "ملغي")
+    pending_count = sum(1 for a in user_appts if a.get("status") == "قيد الانتظار")
+    confirmed_count = sum(1 for a in user_appts if a.get("status") == "مؤكد")
+    completed_count = sum(1 for a in user_appts if a.get("status") == "مكتمل")
+
+    with col_a1:
+        st.markdown(f"""
+        <div class="kpi-card" style="--card-accent: linear-gradient(90deg, #38bdf8, #6366f1);">
+            <div class="kpi-header">
+                <span class="kpi-icon-pill" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25);">📅 المواعيد</span>
+                <span class="kpi-title">إجمالي المواعيد</span>
+            </div>
+            <div class="kpi-val">{len(user_appts)}</div>
+            <div class="kpi-desc">سجلات الحجوزات النشطة</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_a2:
+        st.markdown(f"""
+        <div class="kpi-card" style="--card-accent: linear-gradient(90deg, #10b981, #06b6d4);">
+            <div class="kpi-header">
+                <span class="kpi-icon-pill" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.25);">🕒 مواعيد اليوم</span>
+                <span class="kpi-title">حجوزات اليوم</span>
+            </div>
+            <div class="kpi-val">{today_count}</div>
+            <div class="kpi-desc" style="color: #10b981; border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.1);">🟢 بتوقيت عمان</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_a3:
+        st.markdown(f"""
+        <div class="kpi-card" style="--card-accent: linear-gradient(90deg, #f59e0b, #ef4444);">
+            <div class="kpi-header">
+                <span class="kpi-icon-pill" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.25);">⏳ بالانتظار</span>
+                <span class="kpi-title">قيد المراجعة</span>
+            </div>
+            <div class="kpi-val">{pending_count}</div>
+            <div class="kpi-desc" style="color: #fbbf24; border-color: rgba(245, 158, 11, 0.25); background: rgba(245, 158, 11, 0.1);">تحتاج لتأكيد</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_a4:
+        st.markdown(f"""
+        <div class="kpi-card" style="--card-accent: linear-gradient(90deg, #a855f7, #ec4899);">
+            <div class="kpi-header">
+                <span class="kpi-icon-pill" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.25);">✅ مكتملة ومؤكدة</span>
+                <span class="kpi-title">المواعيد الناجحة</span>
+            </div>
+            <div class="kpi-val">{confirmed_count + completed_count}</div>
+            <div class="kpi-desc" style="color: #c084fc; border-color: rgba(168, 85, 247, 0.25); background: rgba(168, 85, 247, 0.1);">مواعيد منتهية ومؤكدة</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 2. نموذج حجز موعد جديد
+    with st.expander("➕ حجز موعد جديد وإضافته للنظام", expanded=False):
+        with st.form("new_appointment_form", clear_on_submit=True):
+            c_form1, c_form2 = st.columns(2)
+            with c_form1:
+                cust_name = st.text_input("اسم العميل:")
+                cust_phone = st.text_input("رقم الهاتف:")
+                service_type = st.selectbox(
+                    "نوع الخدمة / الاستشارة:",
+                    ["استشارة عامة", "دعم فني وبرمجي", "جلسة مبيعات وعروض", "خدمة عملاء وشكاوى", "اجتماع تنفيذي"]
+                )
+
+            with c_form2:
+                users = load_json(USERS_FILE, default_users)
+                employees = [u for u in users if u["role"] == "employee"]
+                emp_names = {u["username"]: f"{u['name']} ({u['job_title']})" for u in employees}
+                assigned_emp = st.selectbox(
+                    "الموظف المسؤول عن الموعد:",
+                    list(emp_names.keys()) if emp_names else ["admin"],
+                    format_func=lambda x: emp_names.get(x, x)
+                )
+
+                appt_date_val = st.date_input("تاريخ الموعد:", value=jordan_now().date())
+                time_slots = [
+                    "09:00 ص", "10:00 ص", "11:00 ص", "12:00 م",
+                    "01:00 م", "02:00 م", "03:00 م", "04:00 م", "05:00 م"
+                ]
+                appt_time_val = st.selectbox("وقت الموعد:", time_slots, index=3)
+
+            appt_notes = st.text_input("ملاحظات إضافية حول الموعد (اختياري):")
+
+            if st.form_submit_button("💾 تأكيد وحجز الموعد الآن", use_container_width=True):
+                if cust_name.strip():
+                    create_appointment(
+                        customer_name=cust_name.strip(),
+                        customer_phone=cust_phone.strip(),
+                        service=service_type,
+                        appt_date=str(appt_date_val),
+                        appt_time=appt_time_val,
+                        assigned_to=assigned_emp,
+                        notes=appt_notes.strip(),
+                        source="من لوحة التحكم"
+                    )
+                    log_audit(current_user["username"], "CREATE_APPOINTMENT", f"Created appt for {cust_name} on {appt_date_val}")
+                    st.success(f"✅ تم حجز الموعد بنجاح للعميل '{cust_name}' بتاريخ {appt_date_val} الساعة {appt_time_val}!")
+                    st.rerun()
+                else:
+                    st.warning("يرجى إدخال اسم العميل.")
+
+    st.markdown("---")
+
+    # 3. عرض وفلترة المواعيد
+    st.subheader("📋 جدول المواعيد والحجوزات")
+
+    col_fltr1, col_fltr2 = st.columns([1, 2])
+    with col_fltr1:
+        filter_status = st.selectbox(
+            "تصفية حسب الحالة:",
+            ["الكل", "مواعيد اليوم", "مؤكد", "قيد الانتظار", "مكتمل", "ملغي"]
+        )
+    with col_fltr2:
+        search_q = st.text_input("🔍 بحث سريع باسم العميل أو رقم الهاتف:", placeholder="اكتب للبحث...")
+
+    filtered_appts = list(reversed(user_appts))
+
+    if filter_status == "مواعيد اليوم":
+        filtered_appts = [a for a in filtered_appts if a.get("date") == today_str]
+    elif filter_status != "الكل":
+        filtered_appts = [a for a in filtered_appts if a.get("status") == filter_status]
+
+    if search_q.strip():
+        sq = search_q.strip().lower()
+        filtered_appts = [
+            a for a in filtered_appts 
+            if sq in a.get("customer_name", "").lower() or sq in a.get("customer_phone", "").lower()
+        ]
+
+    if not filtered_appts:
+        st.info("📭 لا توجد مواعيد تطابق خيارات التصفية والبحث حالياً.")
+        return
+
+    for appt in filtered_appts:
+        aid = appt.get("id")
+        status = appt.get("status", "قيد الانتظار")
+        status_icon = "🟢" if status == "مؤكد" else ("⏳" if status == "قيد الانتظار" else ("✅" if status == "مكتمل" else "❌"))
+
+        with st.expander(f"📅 {appt.get('customer_name')} | {appt.get('service')} | التاريخ: {appt.get('date')} ({appt.get('time')}) - [{status_icon} {status}]", expanded=False):
+            c_info1, c_info2 = st.columns(2)
+            with c_info1:
+                st.write(f"**👤 اسم العميل:** {appt.get('customer_name')}")
+                st.write(f"**📞 الهاتف:** {appt.get('customer_phone') or 'غير محدد'}")
+                st.write(f"**💼 نوع الخدمة:** {appt.get('service')}")
+            with c_info2:
+                st.write(f"**🕒 الموعد:** {appt.get('date')} الساعة {appt.get('time')}")
+                st.write(f"**👔 الموظف المسؤول:** {appt.get('assigned_to')}")
+                st.write(f"**📌 المصدر:** {appt.get('source', 'النظام')}")
+
+            if appt.get("notes"):
+                st.info(f"📝 **ملاحظات:** {appt.get('notes')}")
+
+            btn_c1, btn_c2, btn_c3, btn_c4 = st.columns(4)
+            with btn_c1:
+                if st.button("✅ تأكيد الموعد", key=f"confirm_appt_{aid}"):
+                    appt["status"] = "مؤكد"
+                    save_appointments(appts)
+                    log_audit(current_user["username"], "CONFIRM_APPT", f"Confirmed appt {aid}")
+                    st.rerun()
+            with btn_c2:
+                if st.button("🏁 إتمام الموعد", key=f"complete_appt_{aid}"):
+                    appt["status"] = "مكتمل"
+                    save_appointments(appts)
+                    log_audit(current_user["username"], "COMPLETE_APPT", f"Completed appt {aid}")
+                    st.rerun()
+            with btn_c3:
+                if st.button("❌ إلغاء الموعد", key=f"cancel_appt_{aid}"):
+                    appt["status"] = "ملغي"
+                    save_appointments(appts)
+                    log_audit(current_user["username"], "CANCEL_APPT", f"Cancelled appt {aid}")
+                    st.rerun()
+            with btn_c4:
+                if is_admin and st.button("🗑️ حذف السجل", key=f"del_appt_{aid}"):
+                    appts = [a for a in appts if a.get("id") != aid]
+                    save_appointments(appts)
+                    log_audit(current_user["username"], "DELETE_APPT", f"Deleted appt {aid}")
+                    st.rerun()
 
 
 def render_sedra_tab(rag, admin_user):
@@ -1522,135 +1802,274 @@ def render_sedra_tab(rag, admin_user):
                     st.write(m["content"])
 
         chatgpt_orb_html = """
-            <div style="direction: rtl; font-family: 'Cairo', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 50%, rgba(30, 27, 75, 0.8) 0%, rgba(9, 13, 22, 0.95) 100%); border-radius: 26px; padding: 26px; border: 1px solid rgba(129, 140, 248, 0.25); box-shadow: 0 15px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.1); backdrop-filter: blur(16px);">
+            <div style="direction: rtl; font-family: 'Cairo', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 50%, rgba(20, 24, 45, 0.9) 0%, rgba(7, 10, 19, 0.98) 100%); border-radius: 28px; padding: 24px; border: 1px solid rgba(129, 140, 248, 0.28); box-shadow: 0 16px 45px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.1); backdrop-filter: blur(20px);">
                 <style>
-                    @keyframes pulseGlow {
-                        0% { transform: scale(0.97); box-shadow: 0 0 35px rgba(99, 102, 241, 0.5), inset 0 0 20px rgba(236, 72, 153, 0.4); }
-                        50% { transform: scale(1.08); box-shadow: 0 0 70px rgba(168, 85, 247, 0.85), inset 0 0 35px rgba(59, 130, 246, 0.7); }
-                        100% { transform: scale(0.97); box-shadow: 0 0 35px rgba(99, 102, 241, 0.5), inset 0 0 20px rgba(236, 72, 153, 0.4); }
+                    /* السائل التموجي المورفينغ الفاخر */
+                    @keyframes liquidMorph {
+                        0%, 100% {
+                            border-radius: 42% 58% 70% 30% / 45% 45% 55% 55%;
+                            transform: rotate(0deg);
+                        }
+                        33% {
+                            border-radius: 70% 30% 50% 50% / 30% 60% 40% 70%;
+                            transform: rotate(120deg);
+                        }
+                        66% {
+                            border-radius: 100% 60% 60% 100% / 100% 100% 60% 60%;
+                            transform: rotate(240deg);
+                        }
                     }
-                    @keyframes ripple {
-                        0% { transform: scale(1); opacity: 0.85; }
-                        100% { transform: scale(1.7); opacity: 0; }
+
+                    @keyframes liquidPulseAura {
+                        0% { transform: scale(0.95); opacity: 0.6; }
+                        50% { transform: scale(1.15); opacity: 0.9; filter: blur(24px); }
+                        100% { transform: scale(0.95); opacity: 0.6; }
                     }
-                    @keyframes soundWave {
-                        0%, 100% { height: 8px; }
-                        50% { height: 26px; }
+
+                    .liquid-orb-wrapper {
+                        position: relative;
+                        width: 140px;
+                        height: 140px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        margin-bottom: 12px;
                     }
-                    .listening-active {
-                        animation: pulseGlow 1.3s ease-in-out infinite !important;
-                        background: radial-gradient(circle at 35% 35%, #ec4899, #8b5cf6, #3b82f6) !important;
+
+                    .liquid-aura {
+                        position: absolute;
+                        width: 120px;
+                        height: 120px;
+                        border-radius: 50%;
+                        background: radial-gradient(circle, rgba(6, 182, 212, 0.6) 0%, rgba(168, 85, 247, 0.6) 50%, rgba(236, 72, 153, 0.4) 100%);
+                        filter: blur(20px);
+                        opacity: 0.7;
+                        transition: all 0.2s ease;
+                        pointer-events: none;
                     }
-                    .wave-bar {
-                        width: 4px;
-                        background: #38bdf8;
-                        border-radius: 4px;
-                        margin: 0 2px;
-                        display: inline-block;
-                        height: 6px;
-                        transition: height 0.2s ease;
+
+                    .liquid-orb {
+                        width: 104px;
+                        height: 104px;
+                        border: none;
+                        outline: none;
+                        cursor: pointer;
+                        position: relative;
+                        z-index: 10;
+                        background: radial-gradient(circle at 30% 30%, #38bdf8 0%, #6366f1 35%, #a855f7 70%, #ec4899 100%);
+                        animation: liquidMorph 6s ease-in-out infinite;
+                        box-shadow: 0 0 35px rgba(99, 102, 241, 0.6), inset 0 0 25px rgba(255, 255, 255, 0.5);
+                        transition: transform 0.15s ease, box-shadow 0.15s ease;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
                     }
-                    .wave-active {
-                        animation: soundWave 0.8s ease-in-out infinite alternate;
+
+                    .liquid-orb:hover {
+                        transform: scale(1.05);
+                        box-shadow: 0 0 50px rgba(168, 85, 247, 0.8), inset 0 0 30px rgba(255, 255, 255, 0.7);
+                    }
+
+                    .listening-liquid {
+                        animation: liquidMorph 2.5s ease-in-out infinite !important;
+                        box-shadow: 0 0 60px rgba(236, 72, 153, 0.9), inset 0 0 30px rgba(255, 255, 255, 0.8) !important;
+                    }
+
+                    #waveCanvas {
+                        width: 100%;
+                        max-width: 360px;
+                        height: 48px;
+                        display: block;
+                        margin: 0 auto 6px auto;
                     }
                 </style>
 
-                <div style="position: relative; display: flex; align-items: center; justify-content: center; margin-bottom: 14px;">
-                    <div id="rippleRing" style="position: absolute; width: 115px; height: 115px; border-radius: 50%; border: 2px solid #818cf8; opacity: 0; pointer-events: none;"></div>
-                    <button id="orbBtn" style="
-                        width: 98px; height: 98px; border-radius: 50%; border: none;
-                        background: radial-gradient(circle at 35% 35%, #6366f1, #a855f7 60%, #3b82f6);
-                        cursor: pointer; position: relative; z-index: 10;
-                        box-shadow: 0 0 38px rgba(129, 140, 248, 0.65), inset 0 0 16px rgba(255, 255, 255, 0.45);
-                        transition: all 0.3s ease; outline: none;
-                        display: flex; align-items: center; justify-content: center;">
-                        <span style="font-size: 36px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.4));">🎙️</span>
+                <div class="liquid-orb-wrapper">
+                    <div id="liquidAura" class="liquid-aura"></div>
+                    <button id="orbBtn" class="liquid-orb">
+                        <span id="orbIcon" style="font-size: 38px; filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5));">🎙️</span>
                     </button>
                 </div>
 
-                <div id="waveBox" style="display: none; align-items: center; justify-content: center; height: 30px; margin-bottom: 6px;">
-                    <span class="wave-bar wave-active" style="animation-delay: 0.1s;"></span>
-                    <span class="wave-bar wave-active" style="animation-delay: 0.3s;"></span>
-                    <span class="wave-bar wave-active" style="animation-delay: 0.2s;"></span>
-                    <span class="wave-bar wave-active" style="animation-delay: 0.4s;"></span>
-                    <span class="wave-bar wave-active" style="animation-delay: 0.15s;"></span>
-                </div>
+                <!-- لوحة الموجات المتفاعلة مباشرة مع تردد ونبرة صوت المستخدم -->
+                <canvas id="waveCanvas" width="360" height="48"></canvas>
 
-                <div id="orbStatus" style="color: #f1f5f9; font-size: 14px; font-weight: 700; text-align: center; letter-spacing: 0.2px;">
+                <div id="orbStatus" style="color: #f8fafc; font-size: 15px; font-weight: 800; text-align: center; letter-spacing: 0.2px;">
                     اضغط على الدائرة وتكلم مع سيدرا بصوتك
                 </div>
-                <div id="subStatus" style="color: #94a3b8; font-size: 11px; margin-top: 4px; font-weight: 500;">
-                    الرد الصوتي المباشر مفعل بالكامل وموصول بملفات الشركة
+                <div id="subStatus" style="color: #94a3b8; font-size: 11px; margin-top: 4px; font-weight: 600;">
+                    موجات صوتية حية • تفاعل لحظي مع نبرة الصوت • حجز مواعيد وإدارة أعمال
                 </div>
             </div>
 
             <script>
                 const orb = document.getElementById('orbBtn');
+                const aura = document.getElementById('liquidAura');
                 const status = document.getElementById('orbStatus');
-                const ring = document.getElementById('rippleRing');
-                const wave = document.getElementById('waveBox');
-                let isRec = false;
+                const canvas = document.getElementById('waveCanvas');
+                const ctx = canvas.getContext('2d');
+                
+                let isListening = false;
                 let recog = null;
+                let audioCtx = null;
+                let analyser = null;
+                let micStream = null;
+                let animFrame = null;
 
                 const win = window.parent || window;
                 const SpeechAPI = win.SpeechRecognition || win.webkitSpeechRecognition;
 
-                orb.onclick = function() {
+                function drawIdleWaves() {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.beginPath();
+                    ctx.moveTo(0, canvas.height / 2);
+                    for (let x = 0; x < canvas.width; x += 10) {
+                        ctx.lineTo(x, canvas.height / 2);
+                    }
+                    ctx.strokeStyle = 'rgba(99, 102, 241, 0.25)';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+                drawIdleWaves();
+
+                function renderLiveAudioWave() {
+                    if (!isListening || !analyser) return;
+
+                    const bufferLength = analyser.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    analyser.getByteFrequencyData(dataArray);
+
+                    // حساب متوسط شدة الصوت ونبرته
+                    let sum = 0;
+                    for (let i = 0; i < bufferLength; i++) {
+                        sum += dataArray[i];
+                    }
+                    const avgVolume = sum / bufferLength; // 0 to 255
+                    const normalizedEnergy = Math.min(avgVolume / 110, 1.6);
+
+                    // تفاعل حجم الدائرة السائلة وتوهجها مع الصوت
+                    const scaleFactor = 1 + (normalizedEnergy * 0.35);
+                    orb.style.transform = `scale(${scaleFactor})`;
+                    aura.style.transform = `scale(${scaleFactor * 1.25})`;
+                    aura.style.opacity = `${0.6 + normalizedEnergy * 0.4}`;
+
+                    // رسم الموجات الصوتية الانسيابية المتفاعلة
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    const time = Date.now() * 0.005;
+                    const numLines = 3;
+                    const colors = [
+                        'rgba(56, 189, 248, 0.85)',
+                        'rgba(168, 85, 247, 0.75)',
+                        'rgba(236, 72, 153, 0.7)'
+                    ];
+
+                    for (let line = 0; line < numLines; line++) {
+                        ctx.beginPath();
+                        ctx.strokeStyle = colors[line];
+                        ctx.lineWidth = 2.5 - (line * 0.5);
+                        
+                        const amp = (8 + (normalizedEnergy * 18)) * (1 - line * 0.2);
+                        const freq = 0.025 + (line * 0.01);
+                        const phase = time + (line * 1.2);
+
+                        for (let x = 0; x < canvas.width; x++) {
+                            // تدرج في طرفي الموجة لتبدو انسيابية
+                            const envelope = Math.sin((x / canvas.width) * Math.PI);
+                            const y = (canvas.height / 2) + Math.sin(x * freq + phase) * amp * envelope;
+                            if (x === 0) ctx.moveTo(x, y);
+                            else ctx.lineTo(x, y);
+                        }
+                        ctx.stroke();
+                    }
+
+                    animFrame = requestAnimationFrame(renderLiveAudioWave);
+                }
+
+                orb.onclick = async function() {
                     if (!SpeechAPI) {
                         status.innerText = 'يرجى استخدام متصفح Google Chrome للتحدث الصوتي.';
                         return;
                     }
-                    if (isRec) {
-                        if (recog) recog.stop();
+
+                    if (isListening) {
+                        stopAll();
                         return;
                     }
 
-                    recog = new SpeechAPI();
-                    recog.lang = 'ar-SA';
-                    recog.interimResults = false;
+                    try {
+                        // تشغيل ميكروفون المتصفح وتحليل الصوت لحظياً
+                        micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        const source = audioCtx.createMediaStreamSource(micStream);
+                        analyser = audioCtx.createAnalyser();
+                        analyser.fftSize = 64;
+                        source.connect(analyser);
 
-                    recog.onstart = function() {
-                        isRec = true;
-                        orb.classList.add('listening-active');
-                        ring.style.animation = 'ripple 1.5s linear infinite';
-                        wave.style.display = 'flex';
-                        status.innerText = 'سيدرا تستمع إليك... تفضل بالحديث';
-                        status.style.color = '#38bdf8';
-                    };
+                        // بدء التعرف على الكلام
+                        recog = new SpeechAPI();
+                        recog.lang = 'ar-JO';
+                        recog.interimResults = false;
 
-                    recog.onresult = function(e) {
-                        const spoken = e.results[0][0].transcript;
-                        status.innerText = '⚡ فهمت صوتك: "' + spoken + '" - جاري تجهيز الرد...';
-                        orb.classList.remove('listening-active');
-                        ring.style.animation = 'none';
-                        wave.style.display = 'none';
+                        recog.onstart = function() {
+                            isListening = true;
+                            orb.classList.add('listening-liquid');
+                            status.innerText = 'سيدرا تستمع لصوتك الآن... تفضل بالحديث';
+                            status.style.color = '#38bdf8';
+                            renderLiveAudioWave();
+                        };
 
-                        const url = new URL(win.location.href);
-                        url.searchParams.set('sedra_voice_q', spoken);
-                        win.location.href = url.toString();
-                    };
+                        recog.onresult = function(e) {
+                            const spoken = e.results[0][0].transcript;
+                            status.innerText = '⚡ فهمت صوتك: "' + spoken + '" - جاري معالجة الطلب...';
+                            status.style.color = '#a855f7';
+                            stopAll();
 
-                    recog.onerror = function() {
-                        isRec = false;
-                        orb.classList.remove('listening-active');
-                        ring.style.animation = 'none';
-                        wave.style.display = 'none';
-                        status.innerText = 'تأكد من السماح بالمايكروفون ثم اضغط وتكلم مجدداً.';
+                            const url = new URL(win.location.href);
+                            url.searchParams.set('sedra_voice_q', spoken);
+                            win.location.href = url.toString();
+                        };
+
+                        recog.onerror = function(err) {
+                            stopAll();
+                            status.innerText = 'تأكد من السماح بالمايكروفون ثم اضغط وتكلم مجدداً.';
+                            status.style.color = '#f87171';
+                        };
+
+                        recog.onend = function() {
+                            stopAll();
+                        };
+
+                        recog.start();
+
+                    } catch (err) {
+                        status.innerText = 'تعذر تشغيل المايكروفون: ' + err.message;
                         status.style.color = '#f87171';
-                    };
-
-                    recog.onend = function() {
-                        isRec = false;
-                        orb.classList.remove('listening-active');
-                        ring.style.animation = 'none';
-                        wave.style.display = 'none';
-                    };
-
-                    recog.start();
+                    }
                 };
+
+                function stopAll() {
+                    isListening = false;
+                    orb.classList.remove('listening-liquid');
+                    orb.style.transform = 'scale(1)';
+                    aura.style.transform = 'scale(1)';
+                    aura.style.opacity = '0.7';
+
+                    if (animFrame) cancelAnimationFrame(animFrame);
+                    if (recog) { try { recog.stop(); } catch(e){} }
+                    if (micStream) {
+                        micStream.getTracks().forEach(t => t.stop());
+                        micStream = null;
+                    }
+                    if (audioCtx) {
+                        try { audioCtx.close(); } catch(e){}
+                        audioCtx = null;
+                    }
+                    drawIdleWaves();
+                }
             </script>
             """
-        st.components.v1.html(chatgpt_orb_html, height=240)
+        st.components.v1.html(chatgpt_orb_html, height=295)
 
         typed = st.chat_input("أو اكتب أمرك هنا...", key="sedra_text_input")
         if typed:
@@ -2050,6 +2469,7 @@ if current_user["role"] == "admin":
         tab_mychat,
         tab_chats,
         tab_sedra,
+        tab_appts,
         tab_recordings,
         tab_mgmt,
         tab_email,
@@ -2061,6 +2481,7 @@ if current_user["role"] == "admin":
         "💬 أسئلتي",
         chats_label,
         "🎙️ سيدرا",
+        "📅 المواعيد والحجوزات",
         "🎧 سجل المكالمات",
         "👥 إدارة الموظفين والمهام",
         "⚙️ إعدادات البريد الإلكتروني",
@@ -2080,6 +2501,9 @@ if current_user["role"] == "admin":
 
     with tab_sedra:
         render_sedra_tab(rag, current_user)
+
+    with tab_appts:
+        render_appointments_tab(current_user)
 
     with tab_recordings:
         st.subheader("🎧 سجل وتفاصيل المكالمات الهاتفية")
@@ -2534,10 +2958,11 @@ else:
         f" 🔴{pending_count}" if pending_count else ""
     )
 
-    t0, t_chats, t1, t2, t3 = st.tabs([
+    t0, t_chats, t1, t_emp_appts, t2, t3 = st.tabs([
         "💡 الأسئلة الشائعة",
         "💬 قروب الشركة والمحادثات",
         "📞 المكالمات المحولة إليّ",
+        "📅 مواعيدي وحجوزاتي",
         tasks_label,
         "💬 الشات الذكي",
     ])
@@ -2571,6 +2996,9 @@ else:
                 log_audit(current_user["username"], "RESOLVE_CALL", f"Call ID {cid}")
                 st.success("تم الحل!")
                 st.rerun()
+
+    with t_emp_appts:
+        render_appointments_tab(current_user)
 
     with t2:
         if not my_tasks_all:
