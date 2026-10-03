@@ -36,30 +36,71 @@ st.set_page_config(
 # ==============================================================================
 CUSTOM_LUXURY_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 
-html, body, [class*="css"], .stMarkdown, .stButton, .stTextInput, .stSelectbox {
-    font-family: 'Cairo', sans-serif !important;
+:root {
+    --primary: #6366f1;
+    --primary-glow: rgba(99, 102, 241, 0.45);
+    --secondary: #a855f7;
+    --secondary-glow: rgba(168, 85, 247, 0.45);
+    --accent: #ec4899;
+    --success: #10b981;
+    --cyan: #06b6d4;
+    --bg-dark: #070913;
 }
 
-/* خلفية النظام وإضاءات خافتة */
+html, body, [class*="css"], .stMarkdown, .stButton, .stTextInput, .stSelectbox, .stTextArea {
+    font-family: 'Cairo', 'Plus Jakarta Sans', sans-serif !important;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* خلفية النظام الشاملة بتدرج الأورورا الفاخر */
 .stApp {
-    background: radial-gradient(circle at top right, #1e1b4b 0%, #0b0f19 50%, #030712 100%);
-    color: #f8fafc;
+    background: 
+        radial-gradient(circle at 10% 15%, rgba(99, 102, 241, 0.16) 0%, transparent 45%),
+        radial-gradient(circle at 90% 20%, rgba(168, 85, 247, 0.14) 0%, transparent 50%),
+        radial-gradient(circle at 50% 85%, rgba(6, 182, 212, 0.09) 0%, transparent 50%),
+        linear-gradient(180deg, #090d16 0%, #04060a 100%) !important;
+    color: #f1f5f9 !important;
 }
 
-/* شريط النبض الحي للنظام */
+/* شريط التمرير فائق النعومة */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.5);
+    border-radius: 8px;
+}
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #4f46e5, #9333ea);
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+}
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #6366f1, #a855f7);
+}
+
+/* شريط النبض الحي للنظام - زجاج عائم */
 .pulse-bar {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: rgba(15, 23, 42, 0.75);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(99, 102, 241, 0.25);
-    border-radius: 16px;
-    padding: 10px 24px;
+    background: rgba(15, 23, 42, 0.72);
+    backdrop-filter: blur(20px) saturate(190%);
+    -webkit-backdrop-filter: blur(20px) saturate(190%);
+    border: 1px solid rgba(129, 140, 248, 0.22);
+    border-radius: 20px;
+    padding: 12px 28px;
     margin-bottom: 24px;
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    box-shadow: 0 12px 35px -5px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+}
+
+.pulse-bar:hover {
+    border-color: rgba(168, 85, 247, 0.4);
+    box-shadow: 0 15px 40px -5px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .pulse-dot {
@@ -75,87 +116,223 @@ html, body, [class*="css"], .stMarkdown, .stButton, .stTextInput, .stSelectbox {
 
 @keyframes livePulse {
     0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-    70% { transform: scale(1.15); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+    70% { transform: scale(1.2); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
     100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
 }
 
-/* كروت المؤشرات الذكية KPI */
+/* كروت المؤشرات الذكية KPI مع العمق ثلاثي الأبعاد */
 .kpi-card {
-    background: linear-gradient(135deg, rgba(30, 27, 75, 0.5) 0%, rgba(15, 23, 42, 0.7) 100%);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(129, 140, 248, 0.2);
-    border-radius: 20px;
-    padding: 18px 20px;
+    position: relative;
+    background: linear-gradient(145deg, rgba(20, 24, 45, 0.75) 0%, rgba(10, 14, 28, 0.85) 100%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    border-radius: 22px;
+    padding: 22px 24px;
     text-align: right;
-    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4);
-    transition: all 0.3s ease;
+    box-shadow: 0 12px 30px -8px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: hidden;
+}
+
+.kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: 3px;
+    background: var(--card-accent, linear-gradient(90deg, #6366f1, #a855f7, #ec4899));
+    opacity: 0.85;
+    transition: opacity 0.3s ease;
 }
 
 .kpi-card:hover {
-    transform: translateY(-4px);
-    border-color: rgba(168, 85, 247, 0.5);
-    box-shadow: 0 15px 30px -5px rgba(147, 51, 234, 0.3);
+    transform: translateY(-6px) scale(1.01);
+    border-color: rgba(168, 85, 247, 0.45);
+    box-shadow: 0 20px 40px -10px rgba(124, 58, 237, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.kpi-card:hover::before {
+    opacity: 1;
+}
+
+.kpi-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.kpi-icon-pill {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
 }
 
 .kpi-title {
-    font-size: 14px;
+    font-size: 13px;
     color: #94a3b8;
     font-weight: 600;
+    letter-spacing: 0.2px;
 }
 
 .kpi-val {
-    font-size: 28px;
-    font-weight: 800;
-    color: #f8fafc;
-    margin: 4px 0;
+    font-size: 32px;
+    font-weight: 900;
+    background: linear-gradient(135deg, #ffffff 0%, #e2e8f0 70%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 6px 0;
+    letter-spacing: -0.5px;
 }
 
 .kpi-desc {
     font-size: 12px;
     color: #38bdf8;
     font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(56, 189, 248, 0.1);
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1px solid rgba(56, 189, 248, 0.22);
 }
 
-/* الأزرار وتأثيرات التوهج */
-.stButton > button {
-    border-radius: 12px !important;
+/* الأزرار العصرية بتأثير التوهج والضغط */
+.stButton > button, div[data-testid="stFormSubmitButton"] > button {
+    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #6366f1 100%) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
+    border-radius: 14px !important;
     font-weight: 700 !important;
-    transition: all 0.25s ease !important;
-    border: 1px solid rgba(99, 102, 241, 0.3) !important;
+    font-size: 14px !important;
+    padding: 10px 22px !important;
+    box-shadow: 0 4px 18px rgba(79, 70, 229, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+    transition: all 0.28s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    letter-spacing: 0.2px !important;
 }
 
-.stButton > button:hover {
-    box-shadow: 0 0 15px rgba(99, 102, 241, 0.6) !important;
-    transform: scale(1.02) !important;
+.stButton > button:hover, div[data-testid="stFormSubmitButton"] > button:hover {
+    box-shadow: 0 8px 25px rgba(124, 58, 237, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+    transform: translateY(-2px) scale(1.015) !important;
+    border-color: rgba(255, 255, 255, 0.35) !important;
 }
 
-/* التبويبات الفاخرة */
+.stButton > button:active, div[data-testid="stFormSubmitButton"] > button:active {
+    transform: translateY(0) scale(0.98) !important;
+}
+
+/* التبويبات الفاخرة بنمط الكبسولة iOS/macOS */
 .stTabs [data-baseweb="tab-list"] {
-    gap: 8px;
-    background-color: rgba(15, 23, 42, 0.6);
-    padding: 8px;
-    border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    gap: 8px !important;
+    background: rgba(15, 23, 42, 0.75) !important;
+    backdrop-filter: blur(14px) !important;
+    padding: 8px !important;
+    border-radius: 20px !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3) !important;
 }
 
 .stTabs [data-baseweb="tab"] {
-    border-radius: 10px;
-    font-weight: 700;
-    color: #94a3b8;
-    padding: 8px 16px;
+    border-radius: 12px !important;
+    font-weight: 700 !important;
+    color: #94a3b8 !important;
+    padding: 10px 20px !important;
+    transition: all 0.25s ease !important;
+    border: 1px solid transparent !important;
+}
+
+.stTabs [data-baseweb="tab"]:hover {
+    color: #f1f5f9 !important;
+    background: rgba(255, 255, 255, 0.04) !important;
 }
 
 .stTabs [aria-selected="true"] {
     background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%) !important;
     color: #ffffff !important;
-    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
 }
 
-/* بطاقات المكالمات والشات */
+/* حقول الإدخال والقوائم المنسدلة */
+.stTextInput > div > div > input,
+.stTextArea textarea,
+.stSelectbox > div > div,
+.stNumberInput input {
+    background: rgba(15, 23, 42, 0.7) !important;
+    border: 1px solid rgba(148, 163, 184, 0.18) !important;
+    border-radius: 14px !important;
+    color: #f8fafc !important;
+    font-family: 'Cairo', sans-serif !important;
+    font-size: 14px !important;
+    padding: 10px 14px !important;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+    transition: all 0.25s ease !important;
+}
+
+.stTextInput > div > div > input:focus,
+.stTextArea textarea:focus,
+.stSelectbox > div > div:focus-within {
+    border-color: #818cf8 !important;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.28), inset 0 1px 2px rgba(0, 0, 0, 0.2) !important;
+    background: rgba(15, 23, 42, 0.9) !important;
+}
+
+/* بطاقات وقوائم الأكورديون (Expanders) */
 .streamlit-expanderHeader {
-    background-color: rgba(30, 41, 59, 0.5) !important;
-    border-radius: 12px !important;
+    background: rgba(20, 27, 45, 0.65) !important;
+    backdrop-filter: blur(12px) !important;
+    border-radius: 16px !important;
+    border: 1px solid rgba(255, 255, 255, 0.07) !important;
+    color: #f1f5f9 !important;
+    font-weight: 700 !important;
+    padding: 12px 18px !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2) !important;
+    transition: all 0.3s ease !important;
+}
+
+.streamlit-expanderHeader:hover {
+    border-color: rgba(129, 140, 248, 0.35) !important;
+    box-shadow: 0 8px 25px rgba(99, 102, 241, 0.2) !important;
+}
+
+.streamlit-expanderContent {
+    background: rgba(15, 23, 42, 0.45) !important;
     border: 1px solid rgba(255, 255, 255, 0.05) !important;
+    border-top: none !important;
+    border-radius: 0 0 16px 16px !important;
+    padding: 18px !important;
+}
+
+/* فقاعات المحادثة (Chat Message Bubbles) */
+.stChatMessage {
+    background: rgba(15, 23, 42, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    border-radius: 18px !important;
+    padding: 14px 18px !important;
+    margin-bottom: 12px !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
+    backdrop-filter: blur(10px) !important;
+    transition: all 0.2s ease !important;
+}
+
+.stChatMessage:hover {
+    border-color: rgba(129, 140, 248, 0.25) !important;
+}
+
+/* بطاقة تسجيل الدخول الزجاجية الفاخرة */
+.login-card {
+    background: linear-gradient(145deg, rgba(20, 27, 45, 0.85) 0%, rgba(12, 17, 32, 0.95) 100%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(129, 140, 248, 0.25);
+    border-radius: 26px;
+    padding: 32px 30px;
+    box-shadow: 0 25px 60px -10px rgba(0, 0, 0, 0.7), 0 0 35px rgba(99, 102, 241, 0.15);
+    margin-top: 20px;
 }
 </style>
 """
@@ -563,10 +740,6 @@ def save_group_chat(msgs):
 
 
 def load_group_state():
-    return load_group_state_data()
-
-
-def load_group_state_data():
     return load_json(GROUP_STATE_FILE, {"open": True})
 
 
@@ -1349,40 +1522,64 @@ def render_sedra_tab(rag, admin_user):
                     st.write(m["content"])
 
         chatgpt_orb_html = """
-            <div style="direction: rtl; font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 50%, #1e1b4b 0%, #090d16 100%); border-radius: 24px; padding: 22px; border: 1px solid #312e81; box-shadow: 0 10px 30px rgba(0,0,0,0.6);">
+            <div style="direction: rtl; font-family: 'Cairo', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 50%, rgba(30, 27, 75, 0.8) 0%, rgba(9, 13, 22, 0.95) 100%); border-radius: 26px; padding: 26px; border: 1px solid rgba(129, 140, 248, 0.25); box-shadow: 0 15px 40px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.1); backdrop-filter: blur(16px);">
                 <style>
                     @keyframes pulseGlow {
-                        0% { transform: scale(0.97); box-shadow: 0 0 30px rgba(99, 102, 241, 0.5), inset 0 0 20px rgba(236, 72, 153, 0.4); }
-                        50% { transform: scale(1.06); box-shadow: 0 0 60px rgba(168, 85, 247, 0.8), inset 0 0 35px rgba(59, 130, 246, 0.6); }
-                        100% { transform: scale(0.97); box-shadow: 0 0 30px rgba(99, 102, 241, 0.5), inset 0 0 20px rgba(236, 72, 153, 0.4); }
+                        0% { transform: scale(0.97); box-shadow: 0 0 35px rgba(99, 102, 241, 0.5), inset 0 0 20px rgba(236, 72, 153, 0.4); }
+                        50% { transform: scale(1.08); box-shadow: 0 0 70px rgba(168, 85, 247, 0.85), inset 0 0 35px rgba(59, 130, 246, 0.7); }
+                        100% { transform: scale(0.97); box-shadow: 0 0 35px rgba(99, 102, 241, 0.5), inset 0 0 20px rgba(236, 72, 153, 0.4); }
                     }
                     @keyframes ripple {
-                        0% { transform: scale(1); opacity: 0.8; }
-                        100% { transform: scale(1.6); opacity: 0; }
+                        0% { transform: scale(1); opacity: 0.85; }
+                        100% { transform: scale(1.7); opacity: 0; }
+                    }
+                    @keyframes soundWave {
+                        0%, 100% { height: 8px; }
+                        50% { height: 26px; }
                     }
                     .listening-active {
-                        animation: pulseGlow 1.4s ease-in-out infinite !important;
+                        animation: pulseGlow 1.3s ease-in-out infinite !important;
                         background: radial-gradient(circle at 35% 35%, #ec4899, #8b5cf6, #3b82f6) !important;
+                    }
+                    .wave-bar {
+                        width: 4px;
+                        background: #38bdf8;
+                        border-radius: 4px;
+                        margin: 0 2px;
+                        display: inline-block;
+                        height: 6px;
+                        transition: height 0.2s ease;
+                    }
+                    .wave-active {
+                        animation: soundWave 0.8s ease-in-out infinite alternate;
                     }
                 </style>
 
-                <div style="position: relative; display: flex; align-items: center; justify-content: center; margin-bottom: 12px;">
-                    <div id="rippleRing" style="position: absolute; width: 110px; height: 110px; border-radius: 50%; border: 2px solid #818cf8; opacity: 0; pointer-events: none;"></div>
+                <div style="position: relative; display: flex; align-items: center; justify-content: center; margin-bottom: 14px;">
+                    <div id="rippleRing" style="position: absolute; width: 115px; height: 115px; border-radius: 50%; border: 2px solid #818cf8; opacity: 0; pointer-events: none;"></div>
                     <button id="orbBtn" style="
-                        width: 95px; height: 95px; border-radius: 50%; border: none;
+                        width: 98px; height: 98px; border-radius: 50%; border: none;
                         background: radial-gradient(circle at 35% 35%, #6366f1, #a855f7 60%, #3b82f6);
                         cursor: pointer; position: relative; z-index: 10;
-                        box-shadow: 0 0 35px rgba(129, 140, 248, 0.6), inset 0 0 15px rgba(255, 255, 255, 0.4);
+                        box-shadow: 0 0 38px rgba(129, 140, 248, 0.65), inset 0 0 16px rgba(255, 255, 255, 0.45);
                         transition: all 0.3s ease; outline: none;
                         display: flex; align-items: center; justify-content: center;">
-                        <span style="font-size: 34px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">🎙️</span>
+                        <span style="font-size: 36px; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.4));">🎙️</span>
                     </button>
                 </div>
 
-                <div id="orbStatus" style="color: #e2e8f0; font-size: 14px; font-weight: 600; text-align: center;">
+                <div id="waveBox" style="display: none; align-items: center; justify-content: center; height: 30px; margin-bottom: 6px;">
+                    <span class="wave-bar wave-active" style="animation-delay: 0.1s;"></span>
+                    <span class="wave-bar wave-active" style="animation-delay: 0.3s;"></span>
+                    <span class="wave-bar wave-active" style="animation-delay: 0.2s;"></span>
+                    <span class="wave-bar wave-active" style="animation-delay: 0.4s;"></span>
+                    <span class="wave-bar wave-active" style="animation-delay: 0.15s;"></span>
+                </div>
+
+                <div id="orbStatus" style="color: #f1f5f9; font-size: 14px; font-weight: 700; text-align: center; letter-spacing: 0.2px;">
                     اضغط على الدائرة وتكلم مع سيدرا بصوتك
                 </div>
-                <div id="subStatus" style="color: #94a3b8; font-size: 11px; margin-top: 4px;">
+                <div id="subStatus" style="color: #94a3b8; font-size: 11px; margin-top: 4px; font-weight: 500;">
                     الرد الصوتي المباشر مفعل بالكامل وموصول بملفات الشركة
                 </div>
             </div>
@@ -1391,6 +1588,7 @@ def render_sedra_tab(rag, admin_user):
                 const orb = document.getElementById('orbBtn');
                 const status = document.getElementById('orbStatus');
                 const ring = document.getElementById('rippleRing');
+                const wave = document.getElementById('waveBox');
                 let isRec = false;
                 let recog = null;
 
@@ -1415,6 +1613,7 @@ def render_sedra_tab(rag, admin_user):
                         isRec = true;
                         orb.classList.add('listening-active');
                         ring.style.animation = 'ripple 1.5s linear infinite';
+                        wave.style.display = 'flex';
                         status.innerText = 'سيدرا تستمع إليك... تفضل بالحديث';
                         status.style.color = '#38bdf8';
                     };
@@ -1424,6 +1623,7 @@ def render_sedra_tab(rag, admin_user):
                         status.innerText = '⚡ فهمت صوتك: "' + spoken + '" - جاري تجهيز الرد...';
                         orb.classList.remove('listening-active');
                         ring.style.animation = 'none';
+                        wave.style.display = 'none';
 
                         const url = new URL(win.location.href);
                         url.searchParams.set('sedra_voice_q', spoken);
@@ -1434,6 +1634,7 @@ def render_sedra_tab(rag, admin_user):
                         isRec = false;
                         orb.classList.remove('listening-active');
                         ring.style.animation = 'none';
+                        wave.style.display = 'none';
                         status.innerText = 'تأكد من السماح بالمايكروفون ثم اضغط وتكلم مجدداً.';
                         status.style.color = '#f87171';
                     };
@@ -1442,13 +1643,14 @@ def render_sedra_tab(rag, admin_user):
                         isRec = false;
                         orb.classList.remove('listening-active');
                         ring.style.animation = 'none';
+                        wave.style.display = 'none';
                     };
 
                     recog.start();
                 };
             </script>
             """
-        st.components.v1.html(chatgpt_orb_html, height=225)
+        st.components.v1.html(chatgpt_orb_html, height=240)
 
         typed = st.chat_input("أو اكتب أمرك هنا...", key="sedra_text_input")
         if typed:
@@ -1648,6 +1850,15 @@ if st.session_state.logged_user is None:
 
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
+        st.markdown("""
+        <div style="text-align: center; margin-bottom: 20px;">
+            <div style="display: inline-flex; align-items: center; justify-content: center; width: 68px; height: 68px; border-radius: 20px; background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(168, 85, 247, 0.2)); border: 1px solid rgba(129, 140, 248, 0.35); box-shadow: 0 0 25px rgba(99, 102, 241, 0.3); margin-bottom: 10px;">
+                <span style="font-size: 32px;">🛡️</span>
+            </div>
+            <h3 style="margin: 0; font-weight: 800; color: #f8fafc;">بوابة النظام المركزي</h3>
+            <p style="color: #94a3b8; font-size: 13px; margin-top: 4px;">سجّل دخولك للمتابعة وإدارة العمليات</p>
+        </div>
+        """, unsafe_allow_html=True)
         with st.form("login_form"):
             u = st.text_input("اسم المستخدم:")
             p = st.text_input("رمز الدخول (PIN):", type="password")
@@ -1692,9 +1903,18 @@ if not current_user:
 
 # الشريط الجانبي
 with st.sidebar:
-    st.write(f"👤 المستخدم الحالي: **{current_user['name']}**")
-    role_display = "مدير عام" if current_user["role"] == "admin" else "موظف"
-    st.caption(f"الصلاحية: {role_display} ({current_user.get('job_title', '')})")
+    role_badge_bg = "linear-gradient(135deg, #4f46e5, #7c3aed)" if current_user["role"] == "admin" else "linear-gradient(135deg, #0284c7, #0d9488)"
+    role_display = "مدير عام ⭐" if current_user["role"] == "admin" else "موظف"
+    st.markdown(f"""
+    <div style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(129, 140, 248, 0.2); border-radius: 18px; padding: 16px; margin-bottom: 14px; text-align: center; box-shadow: 0 8px 25px rgba(0,0,0,0.35);">
+        <div style="font-size: 34px; margin-bottom: 4px;">👤</div>
+        <div style="font-weight: 800; font-size: 16px; color: #f8fafc;">{current_user['name']}</div>
+        <div style="margin-top: 6px;">
+            <span style="background: {role_badge_bg}; color: #ffffff; padding: 3px 12px; border-radius: 12px; font-size: 11px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">{role_display}</span>
+        </div>
+        <div style="font-size: 12px; color: #94a3b8; margin-top: 6px; font-weight: 600;">{current_user.get('job_title', '')}</div>
+    </div>
+    """, unsafe_allow_html=True)
 
     if (
         st.session_state.real_admin_user
@@ -1730,17 +1950,21 @@ with st.sidebar:
 cloud_status_text = "متصل سحابياً (Supabase Live)" if supabase else "وضع تخزين محلي"
 st.markdown(f"""
 <div class="pulse-bar">
-    <div>
+    <div style="display: flex; align-items: center; gap: 10px;">
         <span class="pulse-dot"></span>
-        <strong style="color: #10b981; margin-left: 6px;">حالة النظام:</strong>
-        <span style="color: #cbd5e1;">نشط 24/7 • {cloud_status_text}</span>
+        <strong style="color: #10b981; font-size: 14px;">حالة النظام:</strong>
+        <span style="color: #cbd5e1; font-size: 13px; font-weight: 500;">نشط 24/7 • {cloud_status_text}</span>
     </div>
-    <div>
-        <span style="color: #818cf8;">🎙️ سيدرا AI:</span> <span style="color: #cbd5e1;">متصلة وجاهزة</span>
-        <span style="margin: 0 10px; color: #475569;">|</span>
-        <span style="color: #38bdf8;">🛡️ الأمان:</span> <span style="color: #cbd5e1;">مشفر بالكامل (Argon/Hash)</span>
-        <span style="margin: 0 10px; color: #475569;">|</span>
-        <span style="color: #a855f7;">🕒 التوقيت:</span> <span style="color: #cbd5e1;">{jordan_now().strftime("%I:%M %p")} (عمان)</span>
+    <div style="display: flex; align-items: center; gap: 12px; font-size: 13px; flex-wrap: wrap;">
+        <div style="background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 20px; padding: 4px 14px;">
+            <span style="color: #818cf8; font-weight: 700;">🎙️ سيدرا AI:</span> <span style="color: #e2e8f0;">جاهزة</span>
+        </div>
+        <div style="background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 20px; padding: 4px 14px;">
+            <span style="color: #38bdf8; font-weight: 700;">🛡️ الأمان:</span> <span style="color: #e2e8f0;">مشفر (Argon/Hash)</span>
+        </div>
+        <div style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 20px; padding: 4px 14px;">
+            <span style="color: #c084fc; font-weight: 700;">🕒 التوقيت:</span> <span style="color: #e2e8f0;">{jordan_now().strftime("%I:%M %p")} (عمان)</span>
+        </div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -1766,8 +1990,11 @@ if current_user["role"] == "admin":
     col_kpi1, col_kpi2, col_kpi3, col_kpi4 = st.columns(4)
     with col_kpi1:
         st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">📞 إجمالي المكالمات المؤرشفة</div>
+        <div class="kpi-card" style="--card-accent: linear-gradient(90deg, #38bdf8, #6366f1);">
+            <div class="kpi-header">
+                <span class="kpi-icon-pill" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.25);">📞 سجل الاتصال</span>
+                <span class="kpi-title">المكالمات المؤرشفة</span>
+            </div>
             <div class="kpi-val">{len(all_calls)}</div>
             <div class="kpi-desc">⚡ أرشفة سحابية فورية</div>
         </div>
@@ -1775,28 +2002,37 @@ if current_user["role"] == "admin":
 
     with col_kpi2:
         st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">👥 فريق العمل المسجل</div>
-            <div class="kpi-val">{len(active_employees)} موظفين</div>
-            <div class="kpi-desc">🟢 حسابات نشطة ومحمية</div>
+        <div class="kpi-card" style="--card-accent: linear-gradient(90deg, #10b981, #06b6d4);">
+            <div class="kpi-header">
+                <span class="kpi-icon-pill" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.25);">👥 الموظفين</span>
+                <span class="kpi-title">فريق العمل المسجل</span>
+            </div>
+            <div class="kpi-val">{len(active_employees)} <span style="font-size: 16px; font-weight: 600; color: #94a3b8;">موظفين</span></div>
+            <div class="kpi-desc" style="color: #10b981; border-color: rgba(16, 185, 129, 0.25); background: rgba(16, 185, 129, 0.1);">🟢 حسابات نشطة ومحمية</div>
         </div>
         """, unsafe_allow_html=True)
 
     with col_kpi3:
         st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">📌 نسبة إنجاز المهام</div>
+        <div class="kpi-card" style="--card-accent: linear-gradient(90deg, #a855f7, #ec4899);">
+            <div class="kpi-header">
+                <span class="kpi-icon-pill" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.25);">📌 الإنتاجية</span>
+                <span class="kpi-title">نسبة إنجاز المهام</span>
+            </div>
             <div class="kpi-val">{task_pct}%</div>
-            <div class="kpi-desc">✅ {completed_tasks_count} من أصل {total_tasks} مهام</div>
+            <div class="kpi-desc" style="color: #c084fc; border-color: rgba(168, 85, 247, 0.25); background: rgba(168, 85, 247, 0.1);">✅ {completed_tasks_count} من أصل {total_tasks} مهام</div>
         </div>
         """, unsafe_allow_html=True)
 
     with col_kpi4:
         st.markdown(f"""
-        <div class="kpi-card">
-            <div class="kpi-title">🎙️ محرك سيدرا الصوتي</div>
+        <div class="kpi-card" style="--card-accent: linear-gradient(90deg, #f59e0b, #ef4444);">
+            <div class="kpi-header">
+                <span class="kpi-icon-pill" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.25);">🎙️ سيدرا</span>
+                <span class="kpi-title">المساعد الصوتي الذكي</span>
+            </div>
             <div class="kpi-val">جاهز 100%</div>
-            <div class="kpi-desc">🚀 RAG + Fallback صوتي مزدوج</div>
+            <div class="kpi-desc" style="color: #fbbf24; border-color: rgba(245, 158, 11, 0.25); background: rgba(245, 158, 11, 0.1);">🚀 RAG + صوت مزدوج</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2195,8 +2431,8 @@ if current_user["role"] == "admin":
                 st.markdown("#### 🌐 عناوين السيرفر ومفاتيح الذكاء الاصطناعي")
                 api_addr = st.text_input(
                     "الـ API address للموقع (Endpoint / Base URL):",
-                    value=current_settings.get("api_address", "[https://api.openai.com/v1](https://api.openai.com/v1)"),
-                    help="مثل [https://api.openai.com/v1](https://api.openai.com/v1) أو عنوان السيرفر المحلي الخاص بك مثل http://localhost:11434/v1",
+                    value=current_settings.get("api_address", "https://api.openai.com/v1"),
+                    help="مثل https://api.openai.com/v1 أو عنوان السيرفر المحلي الخاص بك مثل http://localhost:11434/v1",
                 )
 
                 col_k1, col_k2 = st.columns(2)
@@ -2359,3 +2595,4 @@ else:
 
     with t3:
         render_chat_tab(rag, current_user["username"])
+
