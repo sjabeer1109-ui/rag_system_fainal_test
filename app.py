@@ -1423,58 +1423,127 @@ def sedra_handle_command(text, rag, admin_user):
         )
 
     
-    # 5. أوامر حجز واستعلام المواعيد الذكية
-    m_appt = re.search(
-        r"(?:احجز|حجز|سجل|ضيف|إحجز)\s+(?:لي\s+)?موعد(?:اً|ا)?\s+(?:ل|إلى|الى)?\s*([^:\-]+?)(?:\s+(?:يوم|بتاريخ)\s+([^:\-]+?))?(?:\s+(?:الساعة|ساعة)\s+([^:\-]+?))?(?:$|\s*[:\-]\s*(.+))",
-        t,
-    )
-    if m_appt or "احجز موعد" in t or "حجز موعد" in t:
-        c_name = m_appt.group(1).strip() if (m_appt and m_appt.group(1)) else "عميل جديد"
-        c_date = m_appt.group(2).strip() if (m_appt and m_appt.group(2)) else (jordan_now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        c_time = m_appt.group(3).strip() if (m_appt and m_appt.group(3)) else "01:00 م"
-        extra_notes = m_appt.group(4).strip() if (m_appt and m_appt.group(4)) else ""
+    # 5. أوامر حجز واستعلام وإلغاء المواعيد الذكية الشاملة (NLP Engine)
+    appt_keywords = ["موعد", "مواعيد", "حجز", "حجوزات", "احجز", "احجزي", "احجزلي", "حجزلي", "سجل موعد", "سجلي موعد", "بدي موعد", "اعمل موعد", "سوي موعد"]
+    if any(kw in t for kw in appt_keywords):
+        # أ) فحص أمر الإلغاء
+        if any(kw in t for kw in ["الغاء", "إلغاء", "كنسل", "احذف موعد", "حذف موعد"]):
+            appts = load_appointments()
+            m_cancel = re.search(r"(?:الغاء|إلغاء|كنسل|حذف|احذف)\s+(?:موعد\s+)?(?:لـ|ل|إلى|الى|باسم|بإسم)?\s*([^،.\n]+)", t)
+            target_name = m_cancel.group(1).strip() if m_cancel else ""
+            canceled_any = False
+            for a in appts:
+                if target_name and (target_name in a.get("customer_name", "") or a.get("customer_name", "") in target_name):
+                    a["status"] = "ملغي"
+                    canceled_any = True
+                    break
+            if canceled_any:
+                save_appointments(appts)
+                log_audit(admin_user["username"], "SEDRA_CANCEL_APPT", f"Cancelled appt for {target_name}")
+                return f'حاضر يا مديرنا، تم إلغاء الموعد الخاص بـ "{target_name}" بنجاح وتحديث حالته في جدول المواعيد.'
+            else:
+                return f'لم أجد موعداً مسجلاً باسم "{target_name}" لإلغائه.'
 
-        new_appt = create_appointment(
-            customer_name=c_name,
-            customer_phone="",
-            service="حجز عبر سيدرا الذكية",
-            appt_date=c_date,
-            appt_time=c_time,
-            assigned_to="ahmad",
-            notes=extra_notes,
-            source="عبر أوامر سيدرا الصوتية"
-        )
-        log_audit(admin_user["username"], "SEDRA_BOOK_APPT", f"Booked for {c_name} on {c_date} {c_time}")
-        return f'أهلاً بك يا مديرنا، تم حجز الموعد بنجاح للعميل "{c_name}" بتاريخ {c_date} الساعة {c_time}، وتمت إضافته فوراً إلى تبويبة المواعيد والحجوزات.'
+        # ب) فحص أمر الاستعلام أو عرض المواعيد
+        if any(kw in t for kw in ["شو في مواعيد", "مواعيد اليوم", "جدول المواعيد", "المواعيد القادمة", "قائمة المواعيد", "استعلم عن المواعيد", "عرض المواعيد", "استعلمي عن المواعيد", "ايش في مواعيد"]):
+            appts = load_appointments()
+            today_str = jordan_now().strftime("%Y-%m-%d")
+            active_appts = [a for a in appts if a.get("status") != "ملغي"]
+            if not active_appts:
+                return "لا توجد مواعيد مسجلة حالياً في النظام، يمكنك إخباري بحجز موعد جديد في أي وقت بصوتك وسأسجله فوراً."
 
-    if any(kw in t for kw in ["شو في مواعيد", "مواعيد اليوم", "جدول المواعيد", "المواعيد القادمة", "قائمة المواعيد", "استعلم عن المواعيد"]):
-        appts = load_appointments()
-        today_str = jordan_now().strftime("%Y-%m-%d")
-        active_appts = [a for a in appts if a.get("status") != "ملغي"]
-        if not active_appts:
-            return "لا توجد مواعيد مسجلة حالياً في النظام، يمكنك حجز موعد جديد في أي وقت بصوتك أو من تبويبة المواعيد."
+            lines = []
+            for a in active_appts[:6]:
+                lines.append(f"• {a['customer_name']} - {a['service']} (بتاريخ {a['date']} الساعة {a['time']}) - [{a['status']}]")
+            return "جدول المواعيد المسجلة حالياً:\n" + "\n".join(lines)
 
-        lines = []
-        for a in active_appts[:5]:
-            lines.append(f"• {a['customer_name']} - {a['service']} (بتاريخ {a['date']} الساعة {a['time']}) - [{a['status']}]")
-        return "جدول المواعيد المسجلة حالياً:\n" + "\n".join(lines)
+        # ج) أمر حجز موعد جديد الذكي
+        # 1. استخراج الاسم
+        name = "عميل جديد"
+        name_patterns = [
+            r"(?:لـ|ل|إلى|الى|باسم|بإسم|للأخ|للسيد|للعميل)\s+([^\d،.\n]+?)(?=\s+(?:يوم|بتاريخ|الساعة|ساعة|عالساعة|بكرا|بكرة|اليوم)|$)",
+            r"(?:موعد\s+)(?:لـ|ل|إلى|الى|باسم|بإسم)?\s*([^\d،.\n]+?)(?=\s+(?:يوم|بتاريخ|الساعة|ساعة|عالساعة|بكرا|بكرة|اليوم)|$)"
+        ]
+        for np in name_patterns:
+            m_name = re.search(np, t)
+            if m_name:
+                cand = m_name.group(1).strip()
+                stopwords = ["يوم", "الساعة", "ساعة", "بكرا", "بكرة", "غدا", "غداً", "اليوم", "جديد", "سيدرا", "موعد", "مبيعات", "دعم", "صيانة", "بدي", "احجز", "احجزي", "احجزلي"]
+                cand_clean = " ".join([w for w in cand.split() if w not in stopwords])
+                cand_clean = re.sub(r"^(?:باسم|بإسم|لـ|ل|إلى|الى)\s+", "", cand_clean).strip()
+                if cand_clean:
+                    name = cand_clean.title()
+                    break
 
-    if any(kw in t for kw in ["الغاء موعد", "إلغاء موعد", "كنسل موعد"]):
-        appts = load_appointments()
-        m_cancel = re.search(r"(?:الغاء|إلغاء|كنسل)\s+(?:موعد\s+)?(?:ل|إلى|الى)?\s*(.+)", t)
-        target_name = m_cancel.group(1).strip() if m_cancel else ""
-        canceled_any = False
-        for a in appts:
-            if target_name and (target_name in a["customer_name"] or a["customer_name"] in target_name):
-                a["status"] = "ملغي"
-                canceled_any = True
-                break
-        if canceled_any:
-            save_appointments(appts)
-            log_audit(admin_user["username"], "SEDRA_CANCEL_APPT", f"Cancelled appt for {target_name}")
-            return f'تم إلغاء الموعد الخاص بـ "{target_name}" بنجاح وتحديث حالته في جدول المواعيد.'
+        # 2. استخراج التاريخ
+        now = jordan_now()
+        date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") # الافتراضي غداً
+        
+        weekdays_ar = {
+            "اثنين": 0, "إثنين": 0, "اثلاثاء": 1, "ثلاثاء": 1, "اربعاء": 2, "أربعاء": 2,
+            "خميس": 3, "جمعة": 4, "سبت": 5, "احد": 6, "أحد": 6
+        }
+        
+        if "اليوم" in t:
+            date_str = now.strftime("%Y-%m-%d")
+        elif any(kw in t for kw in ["بعد بكرا", "بعد بكرة", "بعد غد"]):
+            date_str = (now + timedelta(days=2)).strftime("%Y-%m-%d")
+        elif any(kw in t for kw in ["بكرا", "بكرة", "غدا", "غداً"]):
+            date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
         else:
-            return f'لم أجد موعداً مسجلاً باسم "{target_name}" لإلغائه.'
+            for day_name, day_idx in weekdays_ar.items():
+                if day_name in t:
+                    days_ahead = (day_idx - now.weekday() + 7) % 7
+                    if days_ahead == 0:
+                        days_ahead = 7
+                    date_str = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+                    break
+
+        # 3. استخراج الوقت
+        time_str = "01:00 م"
+        m_time = re.search(r"(?:الساعة|ساعة|عالساعة)\s*(\d{1,2})(?::(\d{2}))?", t)
+        if m_time:
+            hour = int(m_time.group(1))
+            minute = m_time.group(2) if m_time.group(2) else "00"
+            period = "م"
+            if any(kw in t for kw in ["الصبح", "صباحا", "صباحاً", "صباح"]):
+                period = "ص"
+            elif 1 <= hour <= 6 and not any(kw in t for kw in ["الصبح", "صباحا"]):
+                period = "م"
+            elif 8 <= hour <= 11 and not any(kw in t for kw in ["مساء", "المسا", "الليل"]):
+                period = "ص"
+            elif hour == 12:
+                period = "م"
+            time_str = f"{hour:02d}:{minute} {period}"
+
+        # 4. استخراج الخدمة
+        service = "استشارة عامة"
+        if any(kw in t for kw in ["دعم فني", "صيانة", "عطل", "مشكلة"]):
+            service = "دعم فني وبرمجي"
+        elif any(kw in t for kw in ["مبيعات", "شراء", "اشتراك", "اسعار", "أسعار"]):
+            service = "مبيعات وعروض"
+        elif any(kw in t for kw in ["شكوى", "خدمة عملاء", "استفسار"]):
+            service = "خدمة عملاء"
+        elif any(kw in t for kw in ["تنفيذي", "ادارة", "إدارة", "اجتماع"]):
+            service = "اجتماع تنفيذي"
+
+        # تنفيذ الحجز الفعلي وحفظه في السحاب والملف
+        new_appt = create_appointment(
+            customer_name=name,
+            customer_phone="",
+            service=service,
+            appt_date=date_str,
+            appt_time=time_str,
+            assigned_to="ahmad",
+            notes=t,
+            source="سيدرا الذكية (صوت/شات)"
+        )
+        log_audit(admin_user["username"], "SEDRA_BOOK_APPT", f"Booked for {name} on {date_str} {time_str}")
+
+        if name != "عميل جديد":
+            return f'حاضر يا مديرنا، تم حجز الموعد بنجاح!\n\n👤 **العميل:** {name}\n📅 **التاريخ:** {date_str}\n🕒 **الوقت:** {time_str}\n💼 **القسم:** {service}\n\n✅ تم تسجيل وتثبيت الموعد في تبويبة "📅 المواعيد والحجوزات".'
+        else:
+            return f'حاضر يا مديرنا، تم فتح وتسجيل موعد جديد بتاريخ {date_str} الساعة {time_str} ({service}) في جدول الحجوزات. يمكنك إخباري باسم العميل لتحديثه أو تعديله من تبويبة المواعيد.'
 
     return company_scoped_query(rag, t)
 
